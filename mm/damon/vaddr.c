@@ -22,6 +22,92 @@
 #define DAMON_MIN_REGION 1
 #endif
 
+
+// +++++++ SEPARATE IN ANOTHER FILE +++++++++
+
+#ifdef CONFIG_MEM_SOFT_DIRTY
+
+static inline bool pte_is_pinned(struct vm_area_struct *vma, unsigned long addr, pte_t pte)
+{
+	struct folio *folio;
+
+	if (!pte_write(pte))
+		return false;
+	if (!is_cow_mapping(vma->vm_flags))
+		return false;
+	if (likely(!test_bit(MMF_HAS_PINNED, &vma->vm_mm->flags)))
+		return false;
+	folio = vm_normal_folio(vma, addr, pte);
+	if (!folio)
+		return false;
+	return folio_maybe_dma_pinned(folio);
+}
+
+static inline void clear_soft_dirty(struct vm_area_struct *vma,
+		unsigned long addr, pte_t *pte)
+{
+	/*
+	 * The soft-dirty tracker uses #PF-s to catch writes
+	 * to pages, so write-protect the pte as well. See the
+	 * Documentation/admin-guide/mm/soft-dirty.rst for full description
+	 * of how soft-dirty works.
+	 */
+	pte_t ptent = ptep_get(pte);
+
+	if (pte_present(ptent)) {
+		pte_t old_pte;
+
+		if (pte_is_pinned(vma, addr, ptent))
+			return;
+		old_pte = ptep_modify_prot_start(vma, addr, pte);
+		ptent = pte_wrprotect(old_pte);
+		ptent = pte_clear_soft_dirty(ptent);
+		ptep_modify_prot_commit(vma, addr, pte, old_pte, ptent);
+	} else if (is_swap_pte(ptent)) {
+		ptent = pte_swp_clear_soft_dirty(ptent);
+		set_pte_at(vma->vm_mm, addr, pte, ptent);
+	}
+}
+#else
+static inline void clear_soft_dirty(struct vm_area_struct *vma,
+		unsigned long addr, pte_t *pte)
+{
+}
+#endif
+
+#if defined(CONFIG_MEM_SOFT_DIRTY) && defined(CONFIG_TRANSPARENT_HUGEPAGE)
+static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
+		unsigned long addr, pmd_t *pmdp)
+{
+	pmd_t old, pmd = *pmdp;
+
+	if (pmd_present(pmd)) {
+		/* See comment in change_huge_pmd() */
+		old = pmdp_invalidate(vma, addr, pmdp);
+		if (pmd_dirty(old))
+			pmd = pmd_mkdirty(pmd);
+		if (pmd_young(old))
+			pmd = pmd_mkyoung(pmd);
+
+		pmd = pmd_wrprotect(pmd);
+		pmd = pmd_clear_soft_dirty(pmd);
+
+		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
+	} else if (is_migration_entry(pmd_to_swp_entry(pmd))) {
+		pmd = pmd_swp_clear_soft_dirty(pmd);
+		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
+	}
+}
+#else
+static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
+		unsigned long addr, pmd_t *pmdp)
+{
+}
+#endif
+// ==========================================
+
+
+
 /*
  * 't->pid' should be the pointer to the relevant 'struct pid' having reference
  * count.  Caller must put the returned task, unless it is NULL.
@@ -452,7 +538,7 @@ static int damon_mkold_write_pmd_entry(pmd_t *pmd, unsigned long addr,
 		}
 
 		if (pmd_trans_huge(pmde)) {
-			damon_pmdp_mkold(pmd, walk->vma, addr);
+			damon_pmdp_clean_soft_dirty(pmd, walk->vma, addr);
 			spin_unlock(ptl);
 			return 0;
 		}
@@ -466,62 +552,14 @@ static int damon_mkold_write_pmd_entry(pmd_t *pmd, unsigned long addr,
 	}
 	if (!pte_present(ptep_get(pte)))
 		goto out;
-	damon_ptep_mkold(pte, walk->vma, addr);
+	damon_ptep_clean_soft_dirty(pte, walk->vma, addr);
 out:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
 }
 
-#ifdef CONFIG_HUGETLB_PAGE
-static void damon_hugetlb_mkold_write(pte_t *pte, struct mm_struct *mm,
-				struct vm_area_struct *vma, unsigned long addr)
-{
-	bool referenced = false;
-	pte_t entry = huge_ptep_get(mm, addr, pte);
-	struct folio *folio = pfn_folio(pte_pfn(entry));
-	unsigned long psize = huge_page_size(hstate_vma(vma));
-
-	folio_get(folio);
-
-	if (pte_young(entry)) {
-		referenced = true;
-		entry = pte_mkold(entry);
-		set_huge_pte_at(mm, addr, pte, entry, psize);
-	}
-
-	if (mmu_notifier_clear_young(mm, addr,
-				     addr + huge_page_size(hstate_vma(vma))))
-		referenced = true;
-
-	if (referenced)
-		folio_set_young(folio);
-
-	folio_set_idle(folio);
-	folio_put(folio);
-}
-
-static int damon_mkold_write_hugetlb_entry(pte_t *pte, unsigned long hmask,
-				     unsigned long addr, unsigned long end,
-				     struct mm_walk *walk)
-{
-	struct hstate *h = hstate_vma(walk->vma);
-	spinlock_t *ptl;
-	pte_t entry;
-
-	ptl = huge_pte_lock(h, walk->mm, pte);
-	entry = huge_ptep_get(walk->mm, addr, pte);
-	if (!pte_present(entry))
-		goto out;
-
-	damon_hugetlb_mkold(pte, walk->mm, walk->vma, addr);
-
-out:
-	spin_unlock(ptl);
-	return 0;
-}
-#else
-#define damon_mkold_hugetlb_entry NULL
-#endif /* CONFIG_HUGETLB_PAGE */
+// TODO: Implement damon_hugetlb_mkold_write
+#define damon_mkold_write_hugetlb_entry NULL
 
 static const struct mm_walk_ops damon_mkold_write_ops = {
 	.pmd_entry = damon_mkold_write_pmd_entry,
@@ -545,7 +583,7 @@ static void __damon_va_prepare_write_access_check(struct mm_struct *mm,
 {
 	r->sampling_addr = damon_rand(r->ar.start, r->ar.end);
 
-	damon_va_mkold(mm, r->sampling_addr);
+	damon_va_mkold_write(mm, r->sampling_addr);
 }
 
 static void damon_va_prepare_write_access_checks(struct damon_ctx *ctx)
@@ -559,7 +597,7 @@ static void damon_va_prepare_write_access_checks(struct damon_ctx *ctx)
 		if (!mm)
 			continue;
 		damon_for_each_region(r, t)
-			__damon_va_prepare_access_check(mm, r);
+			__damon_va_prepare_write_access_check(mm, r);
 		mmput(mm);
 	}
 }
@@ -750,6 +788,169 @@ static unsigned int damon_va_check_accesses(struct damon_ctx *ctx)
 	return max_nr_accesses;
 }
 
+
+
+
+
+
+
+
+
+
+
+static int damon_young_write_pmd_entry(pmd_t *pmd, unsigned long addr,
+		unsigned long next, struct mm_walk *walk)
+{
+	pte_t *pte;
+	pte_t ptent;
+	spinlock_t *ptl;
+	struct folio *folio;
+	struct damon_young_walk_private *priv = walk->private;
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (pmd_trans_huge(pmdp_get(pmd))) {
+		pmd_t pmde;
+
+		ptl = pmd_lock(walk->mm, pmd);
+		pmde = pmdp_get(pmd);
+
+		if (!pmd_present(pmde)) {
+			spin_unlock(ptl);
+			return 0;
+		}
+
+		if (!pmd_trans_huge(pmde)) {
+			spin_unlock(ptl);
+			goto regular_page;
+		}
+		folio = damon_get_folio(pmd_pfn(pmde));
+		if (!folio)
+			goto huge_out;
+		if (pmd_soft_dirty(pmde))
+			priv->young = true;
+		*priv->folio_sz = HPAGE_PMD_SIZE;
+		folio_put(folio);
+huge_out:
+		spin_unlock(ptl);
+		return 0;
+	}
+
+regular_page:
+#endif	/* CONFIG_TRANSPARENT_HUGEPAGE */
+
+	pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+	if (!pte) {
+		walk->action = ACTION_AGAIN;
+		return 0;
+	}
+	ptent = ptep_get(pte);
+	if (!pte_present(ptent))
+		goto out;
+	folio = damon_get_folio(pte_pfn(ptent));
+	if (!folio)
+		goto out;
+	if (pte_soft_dirty(ptent))
+		priv->young = true;
+	*priv->folio_sz = folio_size(folio);
+	folio_put(folio);
+out:
+	pte_unmap_unlock(pte, ptl);
+	return 0;
+}
+
+
+// TODO: Implement damon_young_write_hugetlb_entry
+#define damon_young_write_hugetlb_entry NULL
+
+static const struct mm_walk_ops damon_young_write_ops = {
+	.pmd_entry = damon_young_write_pmd_entry,
+	.hugetlb_entry = damon_young_write_hugetlb_entry,
+	.walk_lock = PGWALK_RDLOCK,
+};
+
+static bool damon_va_young_write(struct mm_struct *mm, unsigned long addr,
+		unsigned long *folio_sz)
+{
+	struct damon_young_walk_private arg = {
+		.folio_sz = folio_sz,
+		.young = false,
+	};
+
+	mmap_read_lock(mm);
+	walk_page_range(mm, addr, addr + 1, &damon_young_write_ops, &arg);
+	mmap_read_unlock(mm);
+	return arg.young;
+}
+
+/*
+ * Check whether the region was accessed after the last preparation
+ *
+ * mm	'mm_struct' for the given virtual address space
+ * r	the region to be checked
+ */
+static void __damon_va_check_writes_access(struct mm_struct *mm,
+				struct damon_region *r, bool same_target,
+				struct damon_attrs *attrs)
+{
+	static unsigned long last_addr;
+	static unsigned long last_folio_sz = PAGE_SIZE;
+	static bool last_accessed;
+
+	if (!mm) {
+		damon_update_region_access_rate(r, false, attrs);
+		return;
+	}
+
+	/* If the region is in the last checked page, reuse the result */
+	if (same_target && (ALIGN_DOWN(last_addr, last_folio_sz) ==
+				ALIGN_DOWN(r->sampling_addr, last_folio_sz))) {
+		damon_update_region_access_rate(r, last_accessed, attrs);
+		return;
+	}
+
+	last_accessed = damon_va_young_write(mm, r->sampling_addr, &last_folio_sz);
+	damon_update_region_access_rate(r, last_accessed, attrs);
+
+	last_addr = r->sampling_addr;
+}
+
+static unsigned int damon_va_check_write_accesses(struct damon_ctx *ctx)
+{
+	struct damon_target *t;
+	struct mm_struct *mm;
+	struct damon_region *r;
+	unsigned int max_nr_accesses = 0;
+	bool same_target;
+
+	damon_for_each_target(t, ctx) {
+		mm = damon_get_mm(t);
+		same_target = false;
+		damon_for_each_region(r, t) {
+			__damon_va_check_writes_access(mm, r, same_target,
+					&ctx->attrs);
+			max_nr_accesses = max(r->nr_accesses, max_nr_accesses);
+			same_target = true;
+		}
+		if (mm)
+			mmput(mm);
+	}
+
+	return max_nr_accesses;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /*
  * Functions for the target validity check and cleanup
  */
@@ -868,7 +1069,7 @@ static int __init damon_va_initcall(void)
 	struct damon_operations ops_vaddr_writes = ops;
 	ops_vaddr_writes.id = DAMON_OPS_VADDR_WRITES;
 	ops_vaddr_writes.prepare_access_checks = damon_va_prepare_write_access_checks;
-	ops_vaddr_writes.check_accesses = damon_va_check_accesses;
+	ops_vaddr_writes.check_accesses = damon_va_check_write_accesses;
 
 	err = damon_register_ops(&ops);
 	if (err)

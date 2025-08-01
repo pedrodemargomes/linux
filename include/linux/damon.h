@@ -922,7 +922,7 @@ int damon_select_ops(struct damon_ctx *ctx, enum damon_ops_id id);
 
 static inline bool damon_target_has_pid(const struct damon_ctx *ctx)
 {
-	return ctx->ops.id == DAMON_OPS_VADDR || ctx->ops.id == DAMON_OPS_FVADDR;
+	return ctx->ops.id == DAMON_OPS_VADDR || ctx->ops.id == DAMON_OPS_FVADDR || ctx->ops.id == DAMON_OPS_VADDR_WRITES;
 }
 
 static inline unsigned int damon_max_nr_accesses(const struct damon_attrs *attrs)
