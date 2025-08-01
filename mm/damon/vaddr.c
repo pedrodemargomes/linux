@@ -431,6 +431,146 @@ static void damon_va_prepare_access_checks(struct damon_ctx *ctx)
 	}
 }
 
+
+
+
+
+static int damon_mkold_write_pmd_entry(pmd_t *pmd, unsigned long addr,
+		unsigned long next, struct mm_walk *walk)
+{
+	pte_t *pte;
+	pmd_t pmde;
+	spinlock_t *ptl;
+
+	if (pmd_trans_huge(pmdp_get(pmd))) {
+		ptl = pmd_lock(walk->mm, pmd);
+		pmde = pmdp_get(pmd);
+
+		if (!pmd_present(pmde)) {
+			spin_unlock(ptl);
+			return 0;
+		}
+
+		if (pmd_trans_huge(pmde)) {
+			damon_pmdp_mkold(pmd, walk->vma, addr);
+			spin_unlock(ptl);
+			return 0;
+		}
+		spin_unlock(ptl);
+	}
+
+	pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+	if (!pte) {
+		walk->action = ACTION_AGAIN;
+		return 0;
+	}
+	if (!pte_present(ptep_get(pte)))
+		goto out;
+	damon_ptep_mkold(pte, walk->vma, addr);
+out:
+	pte_unmap_unlock(pte, ptl);
+	return 0;
+}
+
+#ifdef CONFIG_HUGETLB_PAGE
+static void damon_hugetlb_mkold_write(pte_t *pte, struct mm_struct *mm,
+				struct vm_area_struct *vma, unsigned long addr)
+{
+	bool referenced = false;
+	pte_t entry = huge_ptep_get(mm, addr, pte);
+	struct folio *folio = pfn_folio(pte_pfn(entry));
+	unsigned long psize = huge_page_size(hstate_vma(vma));
+
+	folio_get(folio);
+
+	if (pte_young(entry)) {
+		referenced = true;
+		entry = pte_mkold(entry);
+		set_huge_pte_at(mm, addr, pte, entry, psize);
+	}
+
+	if (mmu_notifier_clear_young(mm, addr,
+				     addr + huge_page_size(hstate_vma(vma))))
+		referenced = true;
+
+	if (referenced)
+		folio_set_young(folio);
+
+	folio_set_idle(folio);
+	folio_put(folio);
+}
+
+static int damon_mkold_write_hugetlb_entry(pte_t *pte, unsigned long hmask,
+				     unsigned long addr, unsigned long end,
+				     struct mm_walk *walk)
+{
+	struct hstate *h = hstate_vma(walk->vma);
+	spinlock_t *ptl;
+	pte_t entry;
+
+	ptl = huge_pte_lock(h, walk->mm, pte);
+	entry = huge_ptep_get(walk->mm, addr, pte);
+	if (!pte_present(entry))
+		goto out;
+
+	damon_hugetlb_mkold(pte, walk->mm, walk->vma, addr);
+
+out:
+	spin_unlock(ptl);
+	return 0;
+}
+#else
+#define damon_mkold_hugetlb_entry NULL
+#endif /* CONFIG_HUGETLB_PAGE */
+
+static const struct mm_walk_ops damon_mkold_write_ops = {
+	.pmd_entry = damon_mkold_write_pmd_entry,
+	.hugetlb_entry = damon_mkold_write_hugetlb_entry,
+	.walk_lock = PGWALK_RDLOCK,
+};
+
+static void damon_va_mkold_write(struct mm_struct *mm, unsigned long addr)
+{
+	mmap_read_lock(mm);
+	walk_page_range(mm, addr, addr + 1, &damon_mkold_ops, NULL);
+	mmap_read_unlock(mm);
+}
+
+/*
+ * Functions for the access checking of the regions
+ */
+
+static void __damon_va_prepare_write_access_check(struct mm_struct *mm,
+					struct damon_region *r)
+{
+	r->sampling_addr = damon_rand(r->ar.start, r->ar.end);
+
+	damon_va_mkold(mm, r->sampling_addr);
+}
+
+static void damon_va_prepare_write_access_checks(struct damon_ctx *ctx)
+{
+	struct damon_target *t;
+	struct mm_struct *mm;
+	struct damon_region *r;
+
+	damon_for_each_target(t, ctx) {
+		mm = damon_get_mm(t);
+		if (!mm)
+			continue;
+		damon_for_each_region(r, t)
+			__damon_va_prepare_access_check(mm, r);
+		mmput(mm);
+	}
+}
+
+
+
+
+
+
+
+
 struct damon_young_walk_private {
 	/* size of the folio for the access checked virtual memory address */
 	unsigned long *folio_sz;
@@ -724,10 +864,19 @@ static int __init damon_va_initcall(void)
 	ops_fvaddr.init = NULL;
 	ops_fvaddr.update = NULL;
 
+	/* ops for monitoring only writes accesses for virtual address ranges */
+	struct damon_operations ops_vaddr_writes = ops;
+	ops_vaddr_writes.id = DAMON_OPS_VADDR_WRITES;
+	ops_vaddr_writes.prepare_access_checks = damon_va_prepare_write_access_checks;
+	ops_vaddr_writes.check_accesses = damon_va_check_accesses;
+
 	err = damon_register_ops(&ops);
 	if (err)
 		return err;
-	return damon_register_ops(&ops_fvaddr);
+	err = damon_register_ops(&ops_fvaddr);
+	if (err)
+		return err;
+	return damon_register_ops(&ops_vaddr_writes);
 };
 
 subsys_initcall(damon_va_initcall);

@@ -537,6 +537,7 @@ struct damos {
  */
 enum damon_ops_id {
 	DAMON_OPS_VADDR,
+	DAMON_OPS_VADDR_WRITES,
 	DAMON_OPS_FVADDR,
 	DAMON_OPS_PADDR,
 	NR_DAMON_OPS,
