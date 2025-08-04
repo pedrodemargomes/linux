@@ -1,0 +1,56 @@
+t1    t1.c  
+root@syzkaller:~# cat tests/t1.c 
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+#define KB 1024
+#define MB 1024*KB
+
+int main() {
+	int i;
+	char c;
+	char *m = malloc(500*MB*sizeof(char));
+	
+	for(i=0;i<500*MB;i+=4*KB) {
+		m[i] = '*';
+	}
+
+	sleep(4);
+
+	for(i=0;i<100*MB;i+=4*KB)
+		c = m[i];
+	for(i=100*MB;i<500*MB;i+=4*KB)
+		m[i] = '*';
+
+	return 0;
+}
+root@syzkaller:~# git ^C
+root@syzkaller:~# ^C
+root@syzkaller:~# cd damo/
+root@syzkaller:~/damo# git diff
+diff --git a/src/_damon_args.py b/src/_damon_args.py
+index 55ee3f11..ce75acf9 100644
+--- a/src/_damon_args.py
++++ b/src/_damon_args.py
+@@ -640,7 +640,7 @@ target_type_pid = 'pid'
+ target_type_unknown = None
+ 
+ def deduced_target_type(target):
+-    if target in ['vaddr', 'paddr', 'fvaddr']:
++    if target in ['vaddr', 'vaddr-writes', 'paddr', 'fvaddr']:
+         return target_type_explicit
+     if _damo_subproc.avail_cmd(target.split()[0]):
+         return target_type_cmd
+@@ -849,7 +849,7 @@ def set_monitoring_attrs_argparser(parser, hide_help=False):
+                         if not hide_help else argparse.SUPPRESS)
+ 
+ def set_monitoring_damos_common_args(parser, hide_help=False):
+-    parser.add_argument('--ops', choices=['vaddr', 'paddr', 'fvaddr'],
++    parser.add_argument('--ops', choices=['vaddr', 'vaddr-writes', 'paddr', 'fvaddr'],
+                         action='append',
+                         help='monitoring operations set'
+                         if not hide_help else argparse.SUPPRESS)
+root@syzkaller:~/damo# 
+
+
