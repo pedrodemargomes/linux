@@ -814,7 +814,7 @@ static const struct kobj_type damon_sysfs_attrs_ktype = {
 /* This should match with enum damon_ops_id */
 static const char * const damon_sysfs_ops_strs[] = {
 	"vaddr",
-	"vaddr-writes"
+	"vaddr-writes",
 	"fvaddr",
 	"paddr",
 };
