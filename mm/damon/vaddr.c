@@ -570,7 +570,7 @@ static const struct mm_walk_ops damon_mkold_write_ops = {
 static void damon_va_mkold_write(struct mm_struct *mm, unsigned long addr)
 {
 	mmap_read_lock(mm);
-	walk_page_range(mm, addr, addr + 1, &damon_mkold_ops, NULL);
+	walk_page_range(mm, addr, addr + 1, &damon_mkold_write_ops, NULL);
 	mmap_read_unlock(mm);
 }
 
