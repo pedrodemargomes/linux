@@ -25,7 +25,7 @@
 #endif
 
 static DEFINE_MUTEX(damon_lock);
-static int nr_running_ctxs;
+static int nr_running_kdamonds;
 static bool running_exclusive_ctxs;
 
 static DEFINE_MUTEX(damon_ops_lock);
@@ -517,8 +517,6 @@ struct damon_ctx *damon_new_ctx(void)
 	if (!ctx)
 		return NULL;
 
-	init_completion(&ctx->kdamond_started);
-
 	ctx->attrs.sample_interval = 5 * 1000;
 	ctx->attrs.aggr_interval = 100 * 1000;
 	ctx->attrs.ops_update_interval = 60 * 1000 * 1000;
@@ -528,7 +526,6 @@ struct damon_ctx *damon_new_ctx(void)
 	ctx->next_aggregation_sis = 0;
 	ctx->next_ops_update_sis = 0;
 
-	mutex_init(&ctx->kdamond_lock);
 	mutex_init(&ctx->call_control_lock);
 	mutex_init(&ctx->walk_control_lock);
 
@@ -537,9 +534,36 @@ struct damon_ctx *damon_new_ctx(void)
 
 	INIT_LIST_HEAD(&ctx->adaptive_targets);
 	INIT_LIST_HEAD(&ctx->schemes);
+	INIT_LIST_HEAD(&ctx->list);
 
 	return ctx;
 }
+
+/**
+ * Adds newly allocated and configured @ctx to @kdamond.
+ */
+void damon_add_ctx(struct kdamond *kdamond, struct damon_ctx *ctx)
+{
+	list_add_tail(&ctx->list, &kdamond->contexts);
+	++kdamond->nr_ctxs;
+}
+
+struct kdamond *damon_new_kdamond(void)
+{
+	struct kdamond *kdamond;
+
+	kdamond =3D kzalloc(sizeof(*kdamond), GFP_KERNEL);
+	if (!kdamond)
+		return NULL;
+
+	init_completion(&kdamond->kdamond_started);
+	mutex_init(&kdamond->lock);
+
+	INIT_LIST_HEAD(&kdamond->contexts);
+
+	return kdamond;
+}
+
 
 static void damon_destroy_targets(struct damon_ctx *ctx)
 {
