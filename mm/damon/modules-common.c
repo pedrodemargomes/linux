@@ -9,13 +9,7 @@
 
 #include "modules-common.h"
 
-/*
- * Allocate, set, and return a DAMON context for the physical address space.
- * @ctxp:	Pointer to save the point to the newly created context
- * @targetp:	Pointer to save the point to the newly created target
- */
-int damon_modules_new_paddr_ctx_target(struct damon_ctx **ctxp,
-		struct damon_target **targetp)
+static int __damon_modules_new_paddr_kdamond(struct kdamond *kdamond)
 {
 	struct damon_ctx *ctx;
 	struct damon_target *target;
@@ -35,8 +29,30 @@ int damon_modules_new_paddr_ctx_target(struct damon_ctx **ctxp,
 		return -ENOMEM;
 	}
 	damon_add_target(ctx, target);
+	damon_add_ctx(kdamond, ctx);
 
-	*ctxp = ctx;
-	*targetp = target;
 	return 0;
+}
+
+/*
+ * Allocate, set, and return a DAMON daemon for the physical address space.
+ * @kdamondp:	Pointer to save the point to the newly created kdamond
+ */
+int damon_modules_new_paddr_kdamond(struct kdamond **kdamondp)
+{
+	int err;
+	struct kdamond *kdamond;
+
+	kdamond = damon_new_kdamond();
+	if (!kdamond)
+		return -ENOMEM;
+
+	err = __damon_modules_new_paddr_kdamond(kdamond);
+	if (err) {
+		damon_destroy_kdamond(kdamond);
+		return err;
+	}
+	kdamond->nr_ctxs = 1;
+	*kdamondp = kdamond;
+ 	return 0;
 }

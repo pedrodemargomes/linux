@@ -630,7 +630,7 @@ _ctx *ctx)
 -	sz_limit =3D damon_region_sz_limit(ctx);
 -
  	while (!kdamond_need_stop(ctx)) {
- 		/*
+ 		/
  		 * ctx->attrs and ctx->next_{aggregation,ops_update}_sis could
 @@ -1616,6 +1698,7 @@ static int kdamond_fn(void *data)
  		unsigned long next_aggregation_sis =3D ctx->next_aggregation_sis;

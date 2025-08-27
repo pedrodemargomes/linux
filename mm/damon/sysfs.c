@@ -1128,7 +1128,7 @@ static const struct kobj_type damon_sysfs_contexts_ktype = {
 struct damon_sysfs_kdamond {
 	struct kobject kobj;
 	struct damon_sysfs_contexts *contexts;
-	struct damon_ctx *damon_ctx;
+	struct kdamond *kdamond;
 };
 
 static struct damon_sysfs_kdamond *damon_sysfs_kdamond_alloc(void)
@@ -1161,16 +1161,6 @@ static void damon_sysfs_kdamond_rm_dirs(struct damon_sysfs_kdamond *kdamond)
 {
 	damon_sysfs_contexts_rm_dirs(kdamond->contexts);
 	kobject_put(&kdamond->contexts->kobj);
-}
-
-static bool damon_sysfs_ctx_running(struct damon_ctx *ctx)
-{
-	bool running;
-
-	mutex_lock(&ctx->kdamond_lock);
-	running = ctx->kdamond != NULL;
-	mutex_unlock(&ctx->kdamond_lock);
-	return running;
 }
 
 /*
@@ -1241,15 +1231,15 @@ static const char * const damon_sysfs_cmd_strs[] = {
 static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf)
 {
-	struct damon_sysfs_kdamond *kdamond = container_of(kobj,
-			struct damon_sysfs_kdamond, kobj);
-	struct damon_ctx *ctx = kdamond->damon_ctx;
+	struct damon_sysfs_kdamond *sys_kdamond = container_of(kobj,
+ 			struct damon_sysfs_kdamond, kobj);
+	struct kdamond *kdamond = sys_kdamond->kdamond;
 	bool running;
 
-	if (!ctx)
+	if (!kdamond)
 		running = false;
 	else
-		running = damon_sysfs_ctx_running(ctx);
+		running = damon_kdamond_running(kdamond);
 
 	return sysfs_emit(buf, "%s\n", running ?
 			damon_sysfs_cmd_strs[DAMON_SYSFS_CMD_ON] :
@@ -1367,16 +1357,19 @@ static int damon_sysfs_add_targets(struct damon_ctx *ctx,
 static void damon_sysfs_before_terminate(struct damon_ctx *ctx)
 {
 	struct damon_target *t, *next;
+	struct kdamond *kdamond;
 
 	if (!damon_target_has_pid(ctx))
 		return;
 
-	mutex_lock(&ctx->kdamond_lock);
+	kdamond = ctx->kdamond;
+
+	mutex_lock(&kdamond->lock);
 	damon_for_each_target_safe(t, next, ctx) {
 		put_pid(t->pid);
 		damon_destroy_target(t);
 	}
-	mutex_unlock(&ctx->kdamond_lock);
+	mutex_unlock(&kdamond->lock);
 }
 
 /*
@@ -1392,10 +1385,11 @@ static void damon_sysfs_before_terminate(struct damon_ctx *ctx)
 static int damon_sysfs_upd_schemes_stats(void *data)
 {
 	struct damon_sysfs_kdamond *kdamond = data;
-	struct damon_ctx *ctx = kdamond->damon_ctx;
+	struct damon_ctx *c;
 
-	damon_sysfs_schemes_update_stats(
-			kdamond->contexts->contexts_arr[0]->schemes, ctx);
+	damon_for_each_context(c, kdamond)
+		damon_sysfs_schemes_update_stats(
+				c->schemes, c);
 	return 0;
 }
 
@@ -1435,7 +1429,7 @@ static struct damon_ctx *damon_sysfs_build_ctx(
 static int damon_sysfs_commit_input(void *data)
 {
 	struct damon_sysfs_kdamond *kdamond = data;
-	struct damon_ctx *param_ctx, *test_ctx;
+	struct damon_ctx *param_ctx, *test_ctx, *c;
 	int err;
 
 	if (!damon_sysfs_kdamond_running(kdamond))

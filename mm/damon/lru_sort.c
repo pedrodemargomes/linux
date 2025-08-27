@@ -142,8 +142,18 @@ static struct damos_access_pattern damon_lru_sort_stub_pattern = {
 	.max_age_region = UINT_MAX,
 };
 
-static struct damon_ctx *ctx;
-static struct damon_target *target;
+static struct kdamond *kdamond;
+
+static inline struct damon_ctx *damon_lru_sort_ctx(void)
+{
+	return damon_first_ctx(kdamond);
+}
+
+static inline struct damon_target *damon_lru_sort_target(void)
+{
+	return damon_first_target(
+			damon_lru_sort_ctx());
+}
 
 static struct damos *damon_lru_sort_new_scheme(
 		struct damos_access_pattern *pattern, enum damos_action action)
@@ -192,6 +202,7 @@ static int damon_lru_sort_apply_parameters(void)
 	struct damon_target *param_target;
 	struct damos *hot_scheme, *cold_scheme;
 	unsigned int hot_thres, cold_thres;
+	struct damon_ctx *ctx = damon_lru_sort_ctx();
 	int err;
 
 	err = damon_modules_new_paddr_ctx_target(&param_ctx, &param_target);
@@ -219,9 +230,10 @@ static int damon_lru_sort_apply_parameters(void)
 	damon_set_schemes(param_ctx, &hot_scheme, 1);
 	damon_add_scheme(param_ctx, cold_scheme);
 
-	err = damon_set_region_biggest_system_ram_default(param_target,
-					&monitor_region_start,
-					&monitor_region_end);
+	err = damon_set_region_biggest_system_ram_default(
+					damon_lru_sort_target(),
+ 					&monitor_region_start,
+ 					&monitor_region_end);
 	if (err)
 		goto out;
 	err = damon_commit_ctx(ctx, param_ctx);
@@ -235,7 +247,7 @@ static int damon_lru_sort_turn(bool on)
 	int err;
 
 	if (!on) {
-		err = damon_stop(&ctx, 1);
+		err = damon_stop(kdamond);
 		if (!err)
 			kdamond_pid = -1;
 		return err;
@@ -245,10 +257,10 @@ static int damon_lru_sort_turn(bool on)
 	if (err)
 		return err;
 
-	err = damon_start(&ctx, 1, true);
+	err = damon_start(kdamond, true);
 	if (err)
 		return err;
-	kdamond_pid = ctx->kdamond->pid;
+	kdamond_pid =3D kdamond->self->pid;
 	return 0;
 }
 
@@ -267,8 +279,8 @@ static int damon_lru_sort_enabled_store(const char *val,
 		return 0;
 
 	/* Called before init function.  The function will handle this. */
-	if (!ctx)
-		goto set_param_out;
+	if (!kdamond)
+ 		goto set_param_out;
 
 	err = damon_lru_sort_turn(enable);
 	if (err)
@@ -322,11 +334,13 @@ static int damon_lru_sort_after_wmarks_check(struct damon_ctx *c)
 
 static int __init damon_lru_sort_init(void)
 {
-	int err = damon_modules_new_paddr_ctx_target(&ctx, &target);
+	struct damon_ctx *ctx;
+	int err =3D damon_modules_new_paddr_kdamond(&kdamond);
 
 	if (err)
 		return err;
 
+	ctx = damon_lru_sort_ctx();
 	ctx->callback.after_wmarks_check = damon_lru_sort_after_wmarks_check;
 	ctx->callback.after_aggregation = damon_lru_sort_after_aggregation;
 

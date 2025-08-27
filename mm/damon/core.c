@@ -578,6 +578,12 @@ static void damon_destroy_targets(struct damon_ctx *ctx)
 		damon_destroy_target(t);
 }
 
+static inline void damon_del_ctx(struct damon_ctx *ctx)
+{
+	list_del(&ctx->list);
+}
+
+
 void damon_destroy_ctx(struct damon_ctx *ctx)
 {
 	struct damos *s, *next_s;
@@ -589,6 +595,24 @@ void damon_destroy_ctx(struct damon_ctx *ctx)
 
 	kfree(ctx);
 }
+
+void damon_destroy_ctxs(struct kdamond *kdamond)
+{
+	struct damon_ctx *c, *next;
+
+	damon_for_each_context_safe(c, next, kdamond) {
+		damon_destroy_ctx(c);
+		--kdamond->nr_ctxs;
+	}
+}
+
+void damon_destroy_kdamond(struct kdamond *kdamond)
+{
+	damon_destroy_ctxs(kdamond);
+	mutex_destroy(&kdamond->lock);
+	kfree(kdamond);
+}
+
 
 static unsigned int damon_age_for_new_attrs(unsigned int age,
 		struct damon_attrs *old_attrs, struct damon_attrs *new_attrs)
@@ -1206,13 +1230,23 @@ int damon_commit_ctx(struct damon_ctx *dst, struct damon_ctx *src)
  */
 int damon_nr_running_ctxs(void)
 {
-	int nr_ctxs;
+	int nr_kdamonds;
 
 	mutex_lock(&damon_lock);
-	nr_ctxs = nr_running_ctxs;
+	nr_kdamonds = nr_running_kdamonds;
 	mutex_unlock(&damon_lock);
 
-	return nr_ctxs;
+	return nr_kdamonds;
+}
+
+bool damon_kdamond_running(struct kdamond *kdamond)
+{
+	bool running;
+
+	mutex_lock(&kdamond->lock);
+	running = kdamond->self != NULL;
+	mutex_unlock(&kdamond->lock);
+	return running;
 }
 
 /* Returns the size upper limit for each monitoring region */
@@ -1235,42 +1269,89 @@ static unsigned long damon_region_sz_limit(struct damon_ctx *ctx)
 	return sz;
 }
 
+static bool kdamond_init_ctx(struct damon_ctx *ctx)
+{
+	if (ctx->ops.init)
+		ctx->ops.init(ctx);
+	if (ctx->callback.before_start && ctx->callback.before_start(ctx))
+		return false;
+
+	kdamond_init_intervals_sis(ctx);
+	ctx->sz_limit = damon_region_sz_limit(ctx);
+
+	return true;
+}
+
+static bool kdamond_init_ctxs(struct kdamond *kdamond)
+{
+	struct damon_ctx *c;
+
+	damon_for_each_context(c, kdamond)
+		if (!kdamond_init_ctx(c))
+			return false;
+	return true;
+}
+
+static void kdamond_finish_ctx(struct damon_ctx *ctx)
+{
+	struct damon_target *t;
+	struct damon_region *r, *next;
+
+	damon_for_each_target(t, ctx) {
+		damon_for_each_region_safe(r, next, t)
+			damon_destroy_region(r, t);
+	}
+
+	if (ctx->callback.before_terminate)
+		ctx->callback.before_terminate(ctx);
+	if (ctx->ops.cleanup)
+		ctx->ops.cleanup(ctx);
+}
+
+static void kdamond_finish_ctxs(struct kdamond *kdamond)
+{
+	struct damon_ctx *c;
+
+	damon_for_each_context(c, kdamond)
+		kdamond_finish_ctx(c);
+}
+
+
 static int kdamond_fn(void *data);
 
 /*
  * __damon_start() - Starts monitoring with given context.
- * @ctx:	monitoring context
+ * @kdamond:	daemon to be started
  *
  * This function should be called while damon_lock is hold.
  *
  * Return: 0 on success, negative error code otherwise.
  */
-static int __damon_start(struct damon_ctx *ctx)
+static int __damon_start(struct kdamond *kdamond)
 {
 	int err = -EBUSY;
 
-	mutex_lock(&ctx->kdamond_lock);
-	if (!ctx->kdamond) {
+	mutex_lock(&kdamond->lock);
+	if (!kdamond->self) {
 		err = 0;
-		reinit_completion(&ctx->kdamond_started);
-		ctx->kdamond = kthread_run(kdamond_fn, ctx, "kdamond.%d",
-				nr_running_ctxs);
-		if (IS_ERR(ctx->kdamond)) {
-			err = PTR_ERR(ctx->kdamond);
-			ctx->kdamond = NULL;
+		reinit_completion(&kdamond->kdamond_started);
+		kdamond->self =3D kthread_run(kdamond_fn, kdamond, "kdamond.%d",
+				nr_running_kdamonds);
+		if (IS_ERR(kdamond->self)) {
+			err =3D PTR_ERR(kdamond->self);
+			kdamond->self =3D NULL;
 		} else {
-			wait_for_completion(&ctx->kdamond_started);
+			wait_for_completion(&kdamond->kdamond_started);
 		}
 	}
-	mutex_unlock(&ctx->kdamond_lock);
+	mutex_unlock(&kdamond->lock);
 
 	return err;
 }
 
 /**
  * damon_start() - Starts the monitorings for a given group of contexts.
- * @ctxs:	an array of the pointers for contexts to start monitoring
- * @nr_ctxs:	size of @ctxs
+ * @kdamond:	a daemon that contains list of monitoring contexts
  * @exclusive:	exclusiveness of this contexts group
  *
  * This function starts a group of monitoring threads for a group of monitoring
@@ -1282,72 +1363,57 @@ static int __damon_start(struct damon_ctx *ctx)
  *
  * Return: 0 on success, negative error code otherwise.
  */
-int damon_start(struct damon_ctx **ctxs, int nr_ctxs, bool exclusive)
+int damon_start(struct kdamond *kdamond, bool exclusive)
 {
-	int i;
 	int err = 0;
 
+	BUG_ON(!kdamond);
+	BUG_ON(!kdamond->nr_ctxs);
+
+	if (kdamond->nr_ctxs !=3D 1)
+		return -EINVAL;
+
 	mutex_lock(&damon_lock);
-	if ((exclusive && nr_running_ctxs) ||
+	if ((exclusive && nr_running_kdamonds) ||
 			(!exclusive && running_exclusive_ctxs)) {
 		mutex_unlock(&damon_lock);
 		return -EBUSY;
 	}
 
-	for (i = 0; i < nr_ctxs; i++) {
-		err = __damon_start(ctxs[i]);
-		if (err)
-			break;
-		nr_running_ctxs++;
-	}
-	if (exclusive && nr_running_ctxs)
+	err = __damon_start(kdamond);
+	if (err)
+		return err;
+	nr_running_kdamonds++;
+
+	if (exclusive && nr_running_kdamonds)
 		running_exclusive_ctxs = true;
 	mutex_unlock(&damon_lock);
 
 	return err;
 }
 
-/*
- * __damon_stop() - Stops monitoring of a given context.
- * @ctx:	monitoring context
+/**
+ * damon_stop() - Stops the monitorings for a given group of contexts.
+ * @kdamond:	a daemon (that contains list of monitoring contexts)
+ * to be stopped.
  *
  * Return: 0 on success, negative error code otherwise.
  */
-static int __damon_stop(struct damon_ctx *ctx)
+int damon_stop(struct kdamond *kdamond)
 {
 	struct task_struct *tsk;
 
-	mutex_lock(&ctx->kdamond_lock);
-	tsk = ctx->kdamond;
+	mutex_lock(&kdamond->lock);
+	tsk =3D kdamond->self;
 	if (tsk) {
 		get_task_struct(tsk);
-		mutex_unlock(&ctx->kdamond_lock);
+		mutex_unlock(&kdamond->lock);
 		kthread_stop_put(tsk);
 		return 0;
 	}
-	mutex_unlock(&ctx->kdamond_lock);
+	mutex_unlock(&kdamond->lock);
 
 	return -EPERM;
-}
-
-/**
- * damon_stop() - Stops the monitorings for a given group of contexts.
- * @ctxs:	an array of the pointers for contexts to stop monitoring
- * @nr_ctxs:	size of @ctxs
- *
- * Return: 0 on success, negative error code otherwise.
- */
-int damon_stop(struct damon_ctx **ctxs, int nr_ctxs)
-{
-	int i, err = 0;
-
-	for (i = 0; i < nr_ctxs; i++) {
-		/* nr_running_ctxs is decremented in kdamond_fn */
-		err = __damon_stop(ctxs[i]);
-		if (err)
-			break;
-	}
-	return err;
 }
 
 static bool damon_is_running(struct damon_ctx *ctx)
@@ -2477,25 +2543,15 @@ static void kdamond_init_ctx(struct damon_ctx *ctx)
  */
 static int kdamond_fn(void *data)
 {
-	struct damon_ctx *ctx = data;
-	struct damon_target *t;
-	struct damon_region *r, *next;
+	struct kdamond *kdamond = data;
+	struct damon_ctx *ctx = damon_first_ctx(kdamond);
 	unsigned int max_nr_accesses = 0;
-	unsigned long sz_limit = 0;
 
 	pr_debug("kdamond (%d) starts\n", current->pid);
 
 	complete(&ctx->kdamond_started);
-	kdamond_init_ctx(ctx);
-
-	if (ctx->ops.init)
-		ctx->ops.init(ctx);
-	ctx->regions_score_histogram = kmalloc_array(DAMOS_MAX_SCORE + 1,
-			sizeof(*ctx->regions_score_histogram), GFP_KERNEL);
-	if (!ctx->regions_score_histogram)
+	if (!kdamond_init_ctxs(kdamond))
 		goto done;
-
-	sz_limit = damon_region_sz_limit(ctx);
 
 	while (!kdamond_need_stop(ctx)) {
 		/*
@@ -2508,6 +2564,7 @@ static int kdamond_fn(void *data)
 		unsigned long next_aggregation_sis = ctx->next_aggregation_sis;
 		unsigned long next_ops_update_sis = ctx->next_ops_update_sis;
 		unsigned long sample_interval = ctx->attrs.sample_interval;
+		unsigned long sz_limit = ctx->sz_limit;
 
 		if (kdamond_wait_activation(ctx))
 			break;
@@ -2585,32 +2642,23 @@ static int kdamond_fn(void *data)
 				sample_interval;
 			if (ctx->ops.update)
 				ctx->ops.update(ctx);
-			sz_limit = damon_region_sz_limit(ctx);
+			ctx->sz_limit = damon_region_sz_limit(ctx);
 		}
 	}
 done:
-	damon_for_each_target(t, ctx) {
-		damon_for_each_region_safe(r, next, t)
-			damon_destroy_region(r, t);
-	}
-
-	if (ctx->callback.before_terminate)
-		ctx->callback.before_terminate(ctx);
-	if (ctx->ops.cleanup)
-		ctx->ops.cleanup(ctx);
-	kfree(ctx->regions_score_histogram);
+	kdamond_finish_ctxs(kdamond);
 
 	pr_debug("kdamond (%d) finishes\n", current->pid);
-	mutex_lock(&ctx->kdamond_lock);
-	ctx->kdamond = NULL;
-	mutex_unlock(&ctx->kdamond_lock);
+	mutex_lock(&kdamond->lock);
+	kdamond->self = NULL;
+	mutex_unlock(&kdamond->lock);
 
 	kdamond_call(ctx, true);
 	damos_walk_cancel(ctx);
 
 	mutex_lock(&damon_lock);
-	nr_running_ctxs--;
-	if (!nr_running_ctxs && running_exclusive_ctxs)
+	nr_running_kdamonds--;
+	if (!nr_running_kdamonds && running_exclusive_ctxs)
 		running_exclusive_ctxs = false;
 	mutex_unlock(&damon_lock);
 
