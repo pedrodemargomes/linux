@@ -806,7 +806,7 @@ struct damon_ctx {
 	struct mutex walk_control_lock;
 
 /* public: */
-	struct task_struct *kdamond;
+	// struct task_struct *kdamond;
 	struct mutex kdamond_lock;
 
 	struct damon_operations ops;
@@ -969,6 +969,7 @@ int damon_nr_running_ctxs(void);
 bool damon_is_registered_ops(enum damon_ops_id id);
 int damon_register_ops(struct damon_operations *ops);
 int damon_select_ops(struct damon_ctx *ctx, enum damon_ops_id id);
+int kdamond_nr_ctxs(struct kdamond *kdamond);
 
 static inline bool damon_target_has_pid(const struct damon_ctx *ctx)
 {

@@ -201,7 +201,7 @@ static int damon_reclaim_apply_parameters(void)
 	struct damon_ctx *ctx = damon_reclaim_ctx();
 	int err;
 
-	err = damon_modules_new_paddr_ctx_target(&param_ctx, &param_target);
+	err = damon_modules_new_paddr_kdamond(&kdamond);
 	if (err)
 		return err;
 

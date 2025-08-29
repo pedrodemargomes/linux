@@ -75,14 +75,14 @@ static int damon_sample_wsse_start(void)
 	target->pid = target_pidp;
 
 	ctx->callback.after_aggregation = damon_sample_wsse_after_aggregate;
-	return damon_start(&ctx, 1, true);
+	return damon_start(ctx->kdamond, true);
 }
 
 static void damon_sample_wsse_stop(void)
 {
 	pr_info("stop\n");
 	if (ctx) {
-		damon_stop(&ctx, 1);
+		damon_stop(ctx->kdamond);
 		damon_destroy_ctx(ctx);
 	}
 	if (target_pidp)

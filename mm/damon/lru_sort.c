@@ -205,7 +205,7 @@ static int damon_lru_sort_apply_parameters(void)
 	struct damon_ctx *ctx = damon_lru_sort_ctx();
 	int err;
 
-	err = damon_modules_new_paddr_ctx_target(&param_ctx, &param_target);
+	err = damon_modules_new_paddr_kdamond(&kdamond);
 	if (err)
 		return err;
 
@@ -260,7 +260,7 @@ static int damon_lru_sort_turn(bool on)
 	err = damon_start(kdamond, true);
 	if (err)
 		return err;
-	kdamond_pid =3D kdamond->self->pid;
+	kdamond_pid = kdamond->self->pid;
 	return 0;
 }
 
@@ -335,7 +335,7 @@ static int damon_lru_sort_after_wmarks_check(struct damon_ctx *c)
 static int __init damon_lru_sort_init(void)
 {
 	struct damon_ctx *ctx;
-	int err =3D damon_modules_new_paddr_kdamond(&kdamond);
+	int err = damon_modules_new_paddr_kdamond(&kdamond);
 
 	if (err)
 		return err;

@@ -1086,8 +1086,7 @@ static ssize_t nr_contexts_store(struct kobject *kobj,
 	err = kstrtoint(buf, 0, &nr);
 	if (err)
 		return err;
-	/* TODO: support multiple contexts per kdamond */
-	if (nr < 0 || 1 < nr)
+	if (nr < 0)
 		return -EINVAL;
 
 	contexts = container_of(kobj, struct damon_sysfs_contexts, kobj);
@@ -1384,12 +1383,20 @@ static void damon_sysfs_before_terminate(struct damon_ctx *ctx)
  */
 static int damon_sysfs_upd_schemes_stats(void *data)
 {
-	struct damon_sysfs_kdamond *kdamond = data;
+	struct damon_sysfs_kdamond *sys_kdamond = data;
 	struct damon_ctx *c;
+	struct damon_sysfs_context **sysfs_ctxs;
 
-	damon_for_each_context(c, kdamond)
-		damon_sysfs_schemes_update_stats(
-				c->schemes, c);
+	if (!sys_kdamond->kdamond)
+ 		return -EINVAL;
+
+	sysfs_ctxs = sys_kdamond->contexts->contexts_arr;
+	damon_for_each_context(c, sys_kdamond->kdamond) {
+		struct damon_sysfs_context *sysfs_ctx = *sysfs_ctxs;
+
+		damon_sysfs_schemes_update_stats(sysfs_ctx->schemes, c);
+		++sysfs_ctxs;
+	}
 	return 0;
 }
 
@@ -1424,37 +1431,53 @@ static struct damon_ctx *damon_sysfs_build_ctx(
  * damon_sysfs_commit_input() - Commit user inputs to a running kdamond.
  * @kdamond:	The kobject wrapper for the associated kdamond.
  *
- * Returns error if the sysfs input is wrong.
+ * If the sysfs input is wrong, the kdamond will be terminated.
  */
-static int damon_sysfs_commit_input(void *data)
+static int damon_sysfs_commit_input(struct damon_sysfs_kdamond *sys_kdamond)
 {
-	struct damon_sysfs_kdamond *kdamond = data;
-	struct damon_ctx *param_ctx, *test_ctx, *c;
+	unsigned long ctx_id = 0;
+	struct damon_ctx *c;
+	struct damon_sysfs_context **sysfs_ctxs;
 	int err;
 
-	if (!damon_sysfs_kdamond_running(kdamond))
-		return -EINVAL;
-	/* TODO: Support multiple contexts per kdamond */
-	if (kdamond->contexts->nr != 1)
+	if (!damon_sysfs_kdamond_running(sys_kdamond))
 		return -EINVAL;
 
-	damon_for_each_context(c, kdamond) {
-		param_ctx = damon_sysfs_build_ctx(c);
-		if (IS_ERR(param_ctx))
-			return PTR_ERR(param_ctx);
-		test_ctx = damon_new_ctx();
-		err = damon_commit_ctx(test_ctx, param_ctx);
-		if (err) {
-			damon_sysfs_destroy_targets(test_ctx);
-			damon_destroy_ctx(test_ctx);
-			goto out;
+	sysfs_ctxs = sys_kdamond->contexts->contexts_arr;
+	damon_for_each_context(c, sys_kdamond->kdamond) {
+		struct damon_sysfs_context *sysfs_ctx = *sysfs_ctxs;
+		struct damon_sysfs_intervals *sys_intervals =
+			sysfs_ctx->attrs->intervals;;
+
+		if (sys_kdamond->contexts->nr > 1 &&
+				sys_intervals->sample_us != c->attrs.sample_interval) {
+			pr_err("context_id=%lu: "
+				"multiple contexts must have equal sample_interval\n",
+					ctx_id);
+			/*
+			 * since multiple contexts expect equal
+			 * sample_intervals, try to fix it here
+			 */
+			sys_intervals->sample_us = c->attrs.sample_interval;
 		}
-		err = damon_commit_ctx(c, param_ctx);
-	out:
-		damon_sysfs_destroy_targets(param_ctx);
-		damon_destroy_ctx(param_ctx);
+
+		err = damon_sysfs_apply_inputs(c, sysfs_ctx);
+		if (err)
+			return err;
+		++sysfs_ctxs;
+
+		/* sysfs_ctx may be NIL, so check if it is the last */
+		if (sys_kdamond->contexts->nr > 1 && sysfs_ctxs &&
+				!damon_is_last_ctx(c, sys_kdamond->kdamond)) {
+			sysfs_ctx = *sysfs_ctxs;
+			sys_intervals = sysfs_ctx->attrs->intervals;
+			/* We somehow failed in fixing sample_interval above */
+			BUG_ON(sys_intervals->sample_us != c->attrs.sample_interval);
+		}
+		++ctx_id;
 	}
-	return err;
+
+	return 0;
 }
 
 static int damon_sysfs_commit_schemes_quota_goals(void *data)
@@ -1467,10 +1490,7 @@ static int damon_sysfs_commit_schemes_quota_goals(void *data)
 
 	if (!damon_sysfs_kdamond_running(sysfs_kdamond))
 		return -EINVAL;
-	/* TODO: Support multiple contexts per kdamond */
-	if (sysfs_kdamond->contexts->nr != 1)
-		return -EINVAL;
-
+	
 	sysfs_ctxs = sysfs_kdamond->contexts->contexts_arr;
 	damon_for_each_context(c, sysfs_kdamond->kdamond) {
 		struct damon_sysfs_context *sysfs_ctx = *sysfs_ctxs;
@@ -1511,13 +1531,20 @@ static int damon_sysfs_upd_schemes_effective_quotas(void *data)
 
 static int damon_sysfs_upd_tuned_intervals(void *data)
 {
-	struct damon_sysfs_kdamond *kdamond = data;
-	struct damon_ctx *ctx = kdamond->damon_ctx;
+	struct damon_sysfs_kdamond *sysfs_kdamond = data;
+	struct damon_sysfs_context **sysfs_ctxs;
+	struct damon_ctx *c;
 
-	kdamond->contexts->contexts_arr[0]->attrs->intervals->sample_us =
-		ctx->attrs.sample_interval;
-	kdamond->contexts->contexts_arr[0]->attrs->intervals->aggr_us =
-		ctx->attrs.aggr_interval;
+	sysfs_ctxs = sysfs_kdamond->contexts->contexts_arr;
+	damon_for_each_context(c, sysfs_kdamond->kdamond) {
+		struct damon_sysfs_context *sysfs_ctx = *sysfs_ctxs;
+
+		sysfs_ctx->attrs->intervals->sample_us =
+			c->attrs.sample_interval;
+		sysfs_ctx->attrs->intervals->aggr_us =
+			c->attrs.aggr_interval;
+
+	}
 	return 0;
 }
 
@@ -1562,23 +1589,20 @@ static struct kdamond *damon_sysfs_build_kdamond(
 	return kdamond;
 }
 
-static int damon_sysfs_turn_damon_on(struct damon_sysfs_kdamond *sys_kdamo)
+static int damon_sysfs_turn_damon_on(struct damon_sysfs_kdamond *sysfs_kdamond)
 {
 	struct damon_ctx *ctx;
+	struct kdamond *kdamond;
 	int err;
 
-	if (damon_sysfs_kdamond_running(sys_kdamo))
+	if (damon_sysfs_kdamond_running(sysfs_kdamond))
 		return -EBUSY;
-	/* TODO: support multiple contexts per kdamond */
-	if (sys_kdamo->contexts->nr != 1)
-		return -EINVAL;
+	if (sysfs_kdamond->kdamond)
+		damon_destroy_kdamond(sysfs_kdamond->kdamond);
+	sysfs_kdamond->kdamond = NULL;
 
-	if (sys_kdamo->kdamond)
-		damon_destroy_kdamond(sys_kdamo->kdamond);
-	sys_kdamo->kdamond = NULL;
-
-	kdamond = damon_sysfs_build_kdamond(sys_kdamo->contexts->contexts_arr,
-					    sys_kdamo->contexts->nr);
+	kdamond = damon_sysfs_build_kdamond(sysfs_kdamond->contexts->contexts_arr,
+					    sysfs_kdamond->contexts->nr);
 	if (IS_ERR(kdamond))
 		return PTR_ERR(kdamond);
 	err = damon_start(kdamond, false);
@@ -1586,7 +1610,7 @@ static int damon_sysfs_turn_damon_on(struct damon_sysfs_kdamond *sys_kdamo)
 		damon_destroy_kdamond(kdamond);
 		return err;
 	}
-	sys_kdamond->kdamond = kdamond;
+	sysfs_kdamond->kdamond = kdamond;
 	return err;
 }
 
@@ -1603,15 +1627,22 @@ static int damon_sysfs_turn_damon_off(struct damon_sysfs_kdamond *sys_kdamond)
 }
 
 static int damon_sysfs_damon_call(int (*fn)(void *data),
-		struct damon_sysfs_kdamond *kdamond)
+		struct damon_sysfs_kdamond *sysfs_kdamond)
 {
 	struct damon_call_control call_control = {};
+	struct damon_ctx *c;
 
-	if (!kdamond->damon_ctx)
+	if (!kdamond_nr_ctxs(sysfs_kdamond->kdamond))
 		return -EINVAL;
+	
 	call_control.fn = fn;
-	call_control.data = kdamond;
-	return damon_call(kdamond->damon_ctx, &call_control);
+	call_control.data = sysfs_kdamond;
+
+	damon_for_each_context(c, sysfs_kdamond->kdamond) {
+		damon_call(c, &call_control);
+	}
+
+	return 0;
 }
 
 struct damon_sysfs_schemes_walk_data {
@@ -1644,14 +1675,19 @@ static int damon_sysfs_update_schemes_tried_regions(
 		.walk_fn = damon_sysfs_schemes_tried_regions_upd_one,
 		.data = &walk_data,
 	};
-	struct damon_ctx *ctx = sysfs_kdamond->damon_ctx;
 
-	if (!ctx)
-		return -EINVAL;
+	
+	struct damon_sysfs_context **sysfs_ctxs = sysfs_kdamond->contexts->contexts_arr;
+	struct damon_ctx *ctx;
+	damon_for_each_context(ctx, sysfs_kdamond->kdamond) {
+		struct damon_sysfs_context *sysfs_ctx = *sysfs_ctxs;
 
-	damon_sysfs_schemes_clear_regions(
-			sysfs_kdamond->contexts->contexts_arr[0]->schemes);
-	return damos_walk(ctx, &control);
+		damon_sysfs_schemes_clear_regions(
+				sysfs_ctx->schemes);
+		damos_walk(ctx, &control);
+		++sysfs_ctxs;
+	}
+	return 0;
 }
 
 /*

@@ -553,7 +553,7 @@ struct kdamond *damon_new_kdamond(void)
 {
 	struct kdamond *kdamond;
 
-	kdamond =3D kzalloc(sizeof(*kdamond), GFP_KERNEL);
+	kdamond = kzalloc(sizeof(*kdamond), GFP_KERNEL);
 	if (!kdamond)
 		return NULL;
 
@@ -1252,7 +1252,7 @@ bool damon_kdamond_running(struct kdamond *kdamond)
 /**
  * kdamond_nr_ctxs() - Return number of contexts for this kdamond.
  */
-static int kdamond_nr_ctxs(struct kdamond *kdamond)
+int kdamond_nr_ctxs(struct kdamond *kdamond)
 {
 	struct list_head *pos;
 	int nr_ctxs = 0;
@@ -1283,26 +1283,15 @@ static unsigned long damon_region_sz_limit(struct damon_ctx *ctx)
 	return sz;
 }
 
-static bool kdamond_init_ctx(struct damon_ctx *ctx)
-{
-	if (ctx->ops.init)
-		ctx->ops.init(ctx);
-	if (ctx->callback.before_start && ctx->callback.before_start(ctx))
-		return false;
-
-	kdamond_init_intervals_sis(ctx);
-	ctx->sz_limit = damon_region_sz_limit(ctx);
-
-	return true;
-}
+static void kdamond_init_ctx(struct damon_ctx *ctx);
 
 static bool kdamond_init_ctxs(struct kdamond *kdamond)
 {
 	struct damon_ctx *c;
 
 	damon_for_each_context(c, kdamond)
-		if (!kdamond_init_ctx(c))
-			return false;
+		kdamond_init_ctx(c);
+
 	return true;
 }
 
@@ -1349,11 +1338,11 @@ static int __damon_start(struct kdamond *kdamond)
 	if (!kdamond->self) {
 		err = 0;
 		reinit_completion(&kdamond->kdamond_started);
-		kdamond->self =3D kthread_run(kdamond_fn, kdamond, "kdamond.%d",
+		kdamond->self = kthread_run(kdamond_fn, kdamond, "kdamond.%d",
 				nr_running_kdamonds);
 		if (IS_ERR(kdamond->self)) {
-			err =3D PTR_ERR(kdamond->self);
-			kdamond->self =3D NULL;
+			err = PTR_ERR(kdamond->self);
+			kdamond->self = NULL;
 		} else {
 			wait_for_completion(&kdamond->kdamond_started);
 		}
@@ -1418,7 +1407,7 @@ int damon_stop(struct kdamond *kdamond)
 	struct task_struct *tsk;
 
 	mutex_lock(&kdamond->lock);
-	tsk =3D kdamond->self;
+	tsk = kdamond->self;
 	if (tsk) {
 		get_task_struct(tsk);
 		mutex_unlock(&kdamond->lock);
@@ -1543,7 +1532,7 @@ static void kdamond_reset_aggregated(struct damon_ctx *c, unsigned int ci)
 		struct damon_region *r;
 
 		damon_for_each_region(r, t) {
-			trace_damon_aggregated(ci, ti, r, damon_nr_regions(t));
+			// trace_damon_aggregated(ci, ti, r, damon_nr_regions(t));
 			damon_warn_fix_nr_accesses_corruption(r);
 			r->last_nr_accesses = r->nr_accesses;
 			r->nr_accesses = 0;
@@ -2535,6 +2524,7 @@ static void kdamond_init_ctx(struct damon_ctx *ctx)
 		sample_interval;
 	ctx->next_intervals_tune_sis = ctx->next_aggregation_sis *
 		ctx->attrs.intervals_goal.aggrs;
+	ctx->sz_limit = damon_region_sz_limit(ctx);
 
 	damon_for_each_scheme(scheme, ctx) {
 		apply_interval = scheme->apply_interval_us ?
@@ -2578,16 +2568,28 @@ invalidate_ctx:
 static int kdamond_fn(void *data)
 {
 	struct kdamond *kdamond = data;
-	struct damon_ctx *ctx = damon_first_ctx(kdamond);
+	struct damon_ctx *ctx;
+	struct damon_target *t;
+	struct damon_region *r, *next;
 	unsigned int max_nr_accesses = 0;
+	unsigned long sz_limit = 0;
 
 	pr_debug("kdamond (%d) starts\n", current->pid);
 
-	complete(&ctx->kdamond_started);
-	if (!kdamond_init_ctxs(kdamond))
-		goto done;
+	complete(&kdamond->kdamond_started);
+	kdamond_init_ctxs(kdamond);
+	damon_for_each_context(ctx, kdamond) {
+		if (ctx->ops.init)
+			ctx->ops.init(ctx);
+		ctx->regions_score_histogram = kmalloc_array(DAMOS_MAX_SCORE + 1,
+				sizeof(*ctx->regions_score_histogram), GFP_KERNEL);
+		if (!ctx->regions_score_histogram)
+			goto done;
+	}
 
-	while (!kdamond_need_stop(ctx)) {
+	// sz_limit = damon_region_sz_limit(ctx);
+
+	while (!kdamond_need_stop()) {
 		/*
 		 * ctx->attrs and ctx->next_{aggregation,ops_update}_sis could
 		 * be changed from after_wmarks_check() or after_aggregation()
@@ -2598,14 +2600,15 @@ static int kdamond_fn(void *data)
 		unsigned long next_aggregation_sis = ctx->next_aggregation_sis;
 		unsigned long next_ops_update_sis = ctx->next_ops_update_sis;
 		unsigned long sample_interval = ctx->attrs.sample_interval;
-		unsigned long sz_limit = ctx->sz_limit;
 
-		if (kdamond_wait_activation(ctx))
-			break;
+		damon_for_each_context(ctx, kdamond) {
+			if (kdamond_wait_activation(ctx))
+				break;
 
-		if (ctx->ops.prepare_access_checks)
-			ctx->ops.prepare_access_checks(ctx);
-
+			if (ctx->ops.prepare_access_checks)
+				ctx->ops.prepare_access_checks(ctx);
+		}
+		
 		kdamond_usleep(sample_interval);
 		ctx->passed_sample_intervals++;
 
@@ -2676,28 +2679,38 @@ static int kdamond_fn(void *data)
 				sample_interval;
 			if (ctx->ops.update)
 				ctx->ops.update(ctx);
-			ctx->sz_limit = damon_region_sz_limit(ctx);
+			sz_limit = damon_region_sz_limit(ctx);
 		}
 	}
 done:
-	kdamond_finish_ctxs(kdamond);
+	damon_for_each_target(t, ctx) {
+		damon_for_each_region_safe(r, next, t)
+			damon_destroy_region(r, t);
+	}
+
+	if (ctx->callback.before_terminate)
+		ctx->callback.before_terminate(ctx);
+	if (ctx->ops.cleanup)
+		ctx->ops.cleanup(ctx);
+	kfree(ctx->regions_score_histogram);
 
 	pr_debug("kdamond (%d) finishes\n", current->pid);
-	mutex_lock(&kdamond->lock);
-	kdamond->self = NULL;
-	mutex_unlock(&kdamond->lock);
+	mutex_lock(&ctx->kdamond_lock);
+	ctx->kdamond = NULL;
+	mutex_unlock(&ctx->kdamond_lock);
 
 	kdamond_call(ctx, true);
 	damos_walk_cancel(ctx);
 
 	mutex_lock(&damon_lock);
-	nr_running_kdamonds--;
-	if (!nr_running_kdamonds && running_exclusive_ctxs)
+	nr_running_ctxs--;
+	if (!nr_running_ctxs && running_exclusive_ctxs)
 		running_exclusive_ctxs = false;
 	mutex_unlock(&damon_lock);
 
 	return 0;
 }
+
 
 /*
  * struct damon_system_ram_region - System RAM resource address region of
