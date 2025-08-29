@@ -1368,7 +1368,7 @@ ond)
  		return -EINVAL;
 -	return damon_stop(&kdamond->damon_ctx, 1);
 +	return damon_stop(sys_kdamond->kdamond);
- 	/*
+ 	/
  	 * To allow users show final monitoring results of already turned-off
  	 * DAMON, we free kdamond->damon_ctx in next
 @@ -1654,21 +1730,21 @@ static ssize_t state_store(struct kobject *kobj, st=
@@ -1619,6 +1619,9 @@ index 7cb9979a0..2facf3a5f 100644
  #define damon_for_each_region(r, t) \
  	list_for_each_entry(r, &t->regions_list, list)
 =20
+
+
+// TODO: IMPLEMENT TRACE EVENTS
 diff --git a/include/trace/events/damon.h b/include/trace/events/damon.h
 index 23200aabc..d5287566c 100644
 --- a/include/trace/events/damon.h

@@ -726,7 +726,6 @@ struct damon_attrs {
  * @lock:	Kdamond's global lock, serializes accesses to any field.
  * @self:	Kernel thread which is actually being executed.
  * @contexts:	Head of contexts (&damon_ctx) list.
- * @nr_ctxs:	Number of contexts being monitored.
  *
  * Each DAMON's background daemon has this structure. Once
  * configured, daemon can be started by calling damon_start().
@@ -740,7 +739,6 @@ struct kdamond {
 	struct mutex lock;
 	struct task_struct *self;
 	struct list_head contexts;
-	size_t nr_ctxs;
 
 /* private: */
 	/* for waiting until the execution of the kdamond_fn is started */
@@ -793,6 +791,8 @@ struct damon_ctx {
 	unsigned long next_intervals_tune_sis;
 
 	unsigned long sz_limit;
+	/* marker to check if context is valid */
+	bool valid;
 	struct kdamond *kdamond;
 	struct list_head list;
 
@@ -834,6 +834,12 @@ static inline struct damon_region *damon_last_region(struct damon_target *t)
 static inline struct damon_region *damon_first_region(struct damon_target *t)
 {
 	return list_first_entry(&t->regions_list, struct damon_region, list);
+}
+
+static inline bool damon_is_last_ctx(struct damon_ctx *ctx,
+				     struct kdamond *kdamond)
+{
+	return list_is_last(&ctx->list, &kdamond->contexts);
 }
 
 static inline unsigned long damon_sz_region(struct damon_region *r)
