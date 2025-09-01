@@ -1433,8 +1433,9 @@ static struct damon_ctx *damon_sysfs_build_ctx(
  *
  * If the sysfs input is wrong, the kdamond will be terminated.
  */
-static int damon_sysfs_commit_input(struct damon_sysfs_kdamond *sys_kdamond)
+static int damon_sysfs_commit_input(void *data)
 {
+	struct damon_sysfs_kdamond *sys_kdamond = data;
 	unsigned long ctx_id = 0;
 	struct damon_ctx *c;
 	struct damon_sysfs_context **sysfs_ctxs;
