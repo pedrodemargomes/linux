@@ -368,7 +368,7 @@ acpi_ut_track_allocation(struct acpi_debug_mem_block *allocation,
 	allocation->component = component;
 	allocation->line = line;
 
-	acpi_ut_safe_strncpy(allocation->module, (char *)module,
+	strscpy(allocation->module, (char *)module,
 			     ACPI_MAX_MODULE_NAME);
 
 	if (!element) {
