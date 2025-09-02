@@ -540,7 +540,7 @@ struct damon_ctx *damon_new_ctx(void)
 	ctx->regions_score_histogram = kmalloc_array(DAMOS_MAX_SCORE + 1,
 			sizeof(*ctx->regions_score_histogram), GFP_KERNEL);
 	if (!ctx->regions_score_histogram)
-		goto NULL;
+		return NULL;
 
 	return ctx;
 }
@@ -896,6 +896,18 @@ static struct damos_filter *damos_nth_filter(int n, struct damos *s)
 	return NULL;
 }
 
+static struct damos_filter *damos_nth_ops_filter(int n, struct damos *s)
+{
+	struct damos_filter *filter;
+	int i = 0;
+
+	damos_for_each_ops_filter(filter, s) {
+		if (i++ == n)
+			return filter;
+	}
+	return NULL;
+}
+
 static void damos_commit_filter_arg(
 		struct damos_filter *dst, struct damos_filter *src)
 {
@@ -922,6 +934,7 @@ static void damos_commit_filter(
 {
 	dst->type = src->type;
 	dst->matching = src->matching;
+	dst->allow = src->allow;
 	damos_commit_filter_arg(dst, src);
 }
 
@@ -959,7 +972,7 @@ static int damos_commit_ops_filters(struct damos *dst, struct damos *src)
 	int i = 0, j = 0;
 
 	damos_for_each_ops_filter_safe(dst_filter, next, dst) {
-		src_filter = damos_nth_filter(i++, src);
+		src_filter = damos_nth_ops_filter(i++, src);
 		if (src_filter)
 			damos_commit_filter(dst_filter, src_filter);
 		else
@@ -1046,6 +1059,7 @@ static int damos_commit(struct damos *dst, struct damos *src)
 		return err;
 
 	dst->wmarks = src->wmarks;
+	dst->target_nid = src->target_nid;
 
 	err = damos_commit_filters(dst, src);
 	return err;
@@ -1299,6 +1313,10 @@ static bool kdamond_init_ctxs(struct kdamond *kdamond)
 
 	return true;
 }
+
+static void kdamond_call(struct damon_ctx *ctx, bool cancel);
+
+static void damos_walk_cancel(struct damon_ctx *ctx);
 
 static void kdamond_finish_ctx(struct damon_ctx *ctx)
 {
@@ -2682,7 +2700,7 @@ static int kdamond_fn(void *data)
 				ctx->next_aggregation_sis = next_aggregation_sis +
 					ctx->attrs.aggr_interval / sample_interval;
 
-				kdamond_reset_aggregated(ctx);
+				kdamond_reset_aggregated(ctx, ctx_id);
 				kdamond_split_regions(ctx);
 			}
 

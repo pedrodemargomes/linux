@@ -176,6 +176,14 @@
 
 // static int __init damon_sample_mtier_init(void)
 // {
+// 	int err = 0;
+
+// 	init_called = true;
+// 	if (enable) {
+// 		err = damon_sample_mtier_start();
+// 		if (err)
+// 			enable = false;
+// 	}
 // 	return 0;
 // }
 
