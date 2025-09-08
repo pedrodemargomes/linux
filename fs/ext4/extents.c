@@ -374,6 +374,7 @@ static int ext4_valid_extent(struct inode *inode, struct ext4_extent *ext)
 	 *  - zero length
 	 *  - overflow/wrap-around
 	 */
+	pr_debug("lblock: %u, len: %d", lblock, len);
 	if (lblock + len <= lblock)
 		return 0;
 	return ext4_inode_block_valid(inode, block, len);

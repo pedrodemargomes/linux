@@ -1009,6 +1009,7 @@ void ext4_es_cache_extent(struct inode *inode, ext4_lblk_t lblk,
 	if (!len)
 		return;
 
+	pr_debug("lblock: %u, len: %d, end: %d", lblk, len, end);
 	BUG_ON(end < lblk);
 
 	write_lock(&EXT4_I(inode)->i_es_lock);
