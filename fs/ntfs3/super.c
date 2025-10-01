@@ -1129,6 +1129,7 @@ read_boot:
 	rec->total = cpu_to_le32(sbi->record_size);
 	((struct ATTRIB *)Add2Ptr(rec, ao))->type = ATTR_END;
 
+	pr_err("sb_set_blocksize ntfs3 sbi->cluster_size: %u PAGE_SIZE: %lu", sbi->cluster_size, PAGE_SIZE);
 	sb_set_blocksize(sb, min_t(u32, sbi->cluster_size, PAGE_SIZE));
 
 	sbi->block_mask = sb->s_blocksize - 1;
@@ -1180,6 +1181,7 @@ out:
 			/*
 			 * Try alternative boot (last sector)
 			 */
+			pr_err("sb_set_blocksize ntfs3 block_size: %u", block_size);
 			sb_set_blocksize(sb, block_size);
 			hint = "Alternative boot";
 			dev_size = dev_size0; /* restore original size. */

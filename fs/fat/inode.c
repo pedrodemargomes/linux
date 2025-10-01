@@ -1596,7 +1596,9 @@ int fat_fill_super(struct super_block *sb, struct fs_context *fc,
 	setup(sb); /* flavour-specific stuff that needs options */
 
 	error = -EIO;
-	sb_min_blocksize(sb, 512);
+	if(!sb_min_blocksize(sb, 512)) {
+		pr_err("Error sb_min_blocksize");
+	}
 	bh = sb_bread(sb, 0);
 	if (bh == NULL) {
 		fat_msg(sb, KERN_ERR, "unable to read boot sector");

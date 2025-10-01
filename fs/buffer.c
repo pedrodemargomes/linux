@@ -943,6 +943,7 @@ struct buffer_head *folio_alloc_buffers(struct folio *folio, unsigned long size,
 		bh->b_size = size;
 
 		/* Link the buffer to its folio */
+		pr_err("folio_alloc_buffers folio_size(folio): %lu offset: %ld size: %lu folio_pfn(folio): %lu", folio_size(folio), offset, size, folio_pfn(folio));
 		folio_set_bh(bh, folio, offset);
 	}
 out:
@@ -1072,6 +1073,7 @@ static bool grow_dev_folio(struct block_device *bdev, sector_t block,
 		}
 	}
 
+	pr_err("grow_dev_folio folio_size(folio): %lu size: %lu folio_pfn(folio): %lu", folio_size(folio), size, folio_pfn(folio));
 	bh = folio_alloc_buffers(folio, size, gfp | __GFP_ACCOUNT);
 	if (!bh)
 		goto unlock;
@@ -1579,6 +1581,8 @@ void folio_set_bh(struct buffer_head *bh, struct folio *folio,
 		  unsigned long offset)
 {
 	bh->b_folio = folio;
+
+	pr_err("folio_set_bh folio_size(folio): %lu offset: %ld folio_pfn(folio): %lu", folio_size(folio), offset, folio_pfn(folio));
 	BUG_ON(offset >= folio_size(folio));
 	if (folio_test_highmem(folio))
 		/*

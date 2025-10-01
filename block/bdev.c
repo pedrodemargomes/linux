@@ -219,10 +219,14 @@ EXPORT_SYMBOL(set_blocksize);
 
 int sb_set_blocksize(struct super_block *sb, int size)
 {
-	if (!(sb->s_type->fs_flags & FS_LBS) && size > PAGE_SIZE)
+	if (!(sb->s_type->fs_flags & FS_LBS) && size > PAGE_SIZE) {
+		pr_err("!(sb->s_type->fs_flags & FS_LBS) && size > PAGE_SIZE size: %d", size);
 		return 0;
-	if (set_blocksize(sb->s_bdev_file, size))
+	}
+	if (set_blocksize(sb->s_bdev_file, size)) {
+		pr_err("set_blocksize(sb->s_bdev_file, size) size: %d", size);
 		return 0;
+	}
 	/* If we get here, we know size is validated */
 	sb->s_blocksize = size;
 	sb->s_blocksize_bits = blksize_bits(size);
@@ -236,6 +240,7 @@ int sb_min_blocksize(struct super_block *sb, int size)
 	int minsize = bdev_logical_block_size(sb->s_bdev);
 	if (size < minsize)
 		size = minsize;
+	pr_err("size: %d minsize: %d", size, minsize);
 	return sb_set_blocksize(sb, size);
 }
 
