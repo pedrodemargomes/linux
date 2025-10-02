@@ -545,12 +545,14 @@ static int blkdev_bszset(struct file *file, blk_mode_t mode,
 	if (get_user(n, argp))
 		return -EFAULT;
 
-	if (mode & BLK_OPEN_EXCL)
+	if (mode & BLK_OPEN_EXCL) {
+		pr_err("mode & BLK_OPEN_EXCL set_blocksize n: %d", n);
 		return set_blocksize(file, n);
-
+	}
 	excl_file = bdev_file_open_by_dev(dev, mode, &dev, NULL);
 	if (IS_ERR(excl_file))
 		return -EBUSY;
+	pr_err("end blkdev_bszset set_blocksize n: %d", n);
 	ret = set_blocksize(excl_file, n);
 	fput(excl_file);
 	return ret;
