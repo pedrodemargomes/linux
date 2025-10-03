@@ -1646,6 +1646,7 @@ int setup_bdev_super(struct super_block *sb, int sb_flags,
 	snprintf(sb->s_id, sizeof(sb->s_id), "%pg", bdev);
 	shrinker_debugfs_rename(sb->s_shrink, "sb-%s:%s", sb->s_type->name,
 				sb->s_id);
+	pr_err("setup_bdev_super sb_set_blocksize block_size(bdev) HERE CRASH: %u", block_size(bdev));
 	sb_set_blocksize(sb, block_size(bdev));
 	return 0;
 }

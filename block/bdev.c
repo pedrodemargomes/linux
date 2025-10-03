@@ -219,8 +219,10 @@ EXPORT_SYMBOL(set_blocksize);
 
 int sb_set_blocksize(struct super_block *sb, int size)
 {
+	pr_err("sb_set_blocksize size: %d", size);
 	if (!(sb->s_type->fs_flags & FS_LBS) && size > PAGE_SIZE) {
 		pr_err("!(sb->s_type->fs_flags & FS_LBS) && size > PAGE_SIZE size: %d", size);
+		dump_stack();
 		return 0;
 	}
 	if (set_blocksize(sb->s_bdev_file, size)) {
