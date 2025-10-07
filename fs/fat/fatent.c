@@ -683,6 +683,12 @@ static void fat_ra_init(struct super_block *sb, struct fatent_ra *ra,
 static void fat_ent_reada(struct super_block *sb, struct fatent_ra *ra,
 			  struct fat_entry *fatent)
 {
+    struct page *page;
+    unsigned int sectors_this_bio;
+	struct bio *bio = NULL;
+	unsigned int pages_per_bio = 0;
+	unsigned int sectors_per_page = PAGE_SIZE / sb->s_blocksize;
+
 	if (ra->ra_next >= ra->ra_limit)
 		return;
 
@@ -701,8 +707,50 @@ static void fat_ent_reada(struct super_block *sb, struct fatent_ra *ra,
 		 * FIXME: we would want to directly use the bio with
 		 * pages to reduce the number of segments.
 		 */
-		for (; ra->ra_next < ra->ra_limit; ra->ra_next++)
-			sb_breadahead(sb, ra->ra_next + diff);
+		pr_err("fat_ent_reada");
+		 
+		 /* Start building a single larger BIO */
+		for (; ra->ra_next < ra->ra_limit;) {
+			/* If we have no bio or current bio is full, submit and start a new one */
+			if (!bio || pages_per_bio >= BIO_MAX_VECS) {
+				if (bio) {
+					submit_bio(bio);
+					bio = NULL;
+				}
+
+				bio = bio_alloc(sb->s_bdev, BIO_MAX_VECS, REQ_OP_READ, GFP_NOFS);
+				if (!bio)
+					break;
+
+				bio_set_dev(bio, sb->s_bdev);
+				bio->bi_iter.bi_sector = (ra->ra_next + diff) * (sb->s_blocksize >> 9);
+				bio->bi_opf = REQ_RAHEAD | REQ_BACKGROUND;
+				pages_per_bio = 0;
+			}
+
+			/* Allocate a page for this FAT sector group */
+			page = alloc_page(GFP_NOFS | __GFP_HIGH);
+			if (!page)
+				break;
+
+			/* Add the page covering one or more sectors */
+			if (bio_add_page(bio, page, PAGE_SIZE, 0) < PAGE_SIZE) {
+				__free_page(page);
+				break;
+			}
+
+			pages_per_bio++;
+			sectors_this_bio = sectors_per_page;
+			ra->ra_next += sectors_this_bio;
+		}
+
+		if (bio)
+			submit_bio(bio);
+
+
+
+
+
 		blk_finish_plug(&plug);
 
 		/* Advance the readahead window */
