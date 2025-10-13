@@ -107,6 +107,8 @@ extern void __meminit kcompactd_run(int nid);
 extern void __meminit kcompactd_stop(int nid);
 extern void wakeup_kcompactd(pg_data_t *pgdat, int order, int highest_zoneidx);
 
+unsigned long compact_region(unsigned long start_region_pfn, unsigned long end_region_pfn);
+
 #else
 static inline void reset_isolation_suitable(pg_data_t *pgdat)
 {

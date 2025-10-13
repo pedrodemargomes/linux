@@ -14,6 +14,7 @@
 #include <linux/swap.h>
 #include <linux/memory-tiers.h>
 #include <linux/mm_inline.h>
+#include <linux/compaction.h>
 
 #include "../internal.h"
 #include "ops-common.h"
@@ -125,14 +126,13 @@ static bool damon_pa_invalid_damos_folio(struct folio *folio, struct damos *s)
 	return false;
 }
 
-static unsigned long damon_pa_pageout(struct damon_region *r, struct damos *s,
+static unsigned long damon_pa_compact(struct damon_region *r, struct damos *s,
 		unsigned long *sz_filter_passed)
 {
-	unsigned long addr, applied;
+	unsigned long applied;
 	LIST_HEAD(folio_list);
 	bool install_young_filter = true;
 	struct damos_filter *filter;
-	struct folio *folio;
 
 	/* check access in page level again by default */
 	damos_for_each_ops_filter(filter, s) {
@@ -149,38 +149,70 @@ static unsigned long damon_pa_pageout(struct damon_region *r, struct damos *s,
 		damos_add_filter(s, filter);
 	}
 
-	addr = r->ar.start;
-	while (addr < r->ar.end) {
-		folio = damon_get_folio(PHYS_PFN(addr));
-		if (damon_pa_invalid_damos_folio(folio, s)) {
-			addr += PAGE_SIZE;
-			continue;
-		}
-
-		if (damos_pa_filter_out(s, folio))
-			goto put_folio;
-		else
-			*sz_filter_passed += folio_size(folio);
-
-		folio_clear_referenced(folio);
-		folio_test_clear_young(folio);
-		if (!folio_isolate_lru(folio))
-			goto put_folio;
-		if (folio_test_unevictable(folio))
-			folio_putback_lru(folio);
-		else
-			list_add(&folio->lru, &folio_list);
-put_folio:
-		addr += folio_size(folio);
-		folio_put(folio);
-	}
+	applied = compact_region(PHYS_PFN(r->ar.start), PHYS_PFN(r->ar.end));
+	
 	if (install_young_filter)
 		damos_destroy_filter(filter);
-	applied = reclaim_pages(&folio_list);
 	cond_resched();
-	s->last_applied = folio;
 	return applied * PAGE_SIZE;
 }
+
+// static unsigned long damon_pa_pageout(struct damon_region *r, struct damos *s,
+// 		unsigned long *sz_filter_passed)
+// {
+// 	unsigned long addr, applied;
+// 	LIST_HEAD(folio_list);
+// 	bool install_young_filter = true;
+// 	struct damos_filter *filter;
+// 	struct folio *folio;
+
+// 	/* check access in page level again by default */
+// 	damos_for_each_ops_filter(filter, s) {
+// 		if (filter->type == DAMOS_FILTER_TYPE_YOUNG) {
+// 			install_young_filter = false;
+// 			break;
+// 		}
+// 	}
+// 	if (install_young_filter) {
+// 		filter = damos_new_filter(
+// 				DAMOS_FILTER_TYPE_YOUNG, true, false);
+// 		if (!filter)
+// 			return 0;
+// 		damos_add_filter(s, filter);
+// 	}
+
+// 	addr = r->ar.start;
+// 	while (addr < r->ar.end) {
+// 		folio = damon_get_folio(PHYS_PFN(addr));
+// 		if (damon_pa_invalid_damos_folio(folio, s)) {
+// 			addr += PAGE_SIZE;
+// 			continue;
+// 		}
+
+// 		if (damos_pa_filter_out(s, folio))
+// 			goto put_folio;
+// 		else
+// 			*sz_filter_passed += folio_size(folio);
+
+// 		folio_clear_referenced(folio);
+// 		folio_test_clear_young(folio);
+// 		if (!folio_isolate_lru(folio))
+// 			goto put_folio;
+// 		if (folio_test_unevictable(folio))
+// 			folio_putback_lru(folio);
+// 		else
+// 			list_add(&folio->lru, &folio_list);
+// put_folio:
+// 		addr += folio_size(folio);
+// 		folio_put(folio);
+// 	}
+// 	if (install_young_filter)
+// 		damos_destroy_filter(filter);
+// 	applied = reclaim_pages(&folio_list);
+// 	cond_resched();
+// 	s->last_applied = folio;
+// 	return applied * PAGE_SIZE;
+// }
 
 static inline unsigned long damon_pa_mark_accessed_or_deactivate(
 		struct damon_region *r, struct damos *s, bool mark_accessed,
@@ -303,7 +335,8 @@ static unsigned long damon_pa_apply_scheme(struct damon_ctx *ctx,
 {
 	switch (scheme->action) {
 	case DAMOS_PAGEOUT:
-		return damon_pa_pageout(r, scheme, sz_filter_passed);
+		// return damon_pa_pageout(r, scheme, sz_filter_passed);
+		return damon_pa_compact(r, scheme, sz_filter_passed);
 	case DAMOS_LRU_PRIO:
 		return damon_pa_mark_accessed(r, scheme, sz_filter_passed);
 	case DAMOS_LRU_DEPRIO:
