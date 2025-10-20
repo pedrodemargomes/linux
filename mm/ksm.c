@@ -2455,23 +2455,23 @@ static bool should_skip_rmap_item(struct folio *folio,
 	return true;
 }
 
-struct ksm_walk_private {
-	struct page *page;
+struct ksm_next_page_arg {
 	struct folio *folio;
+	struct page *page;
+	unsigned long addr;
 	struct vm_area_struct *vma;
-	unsigned long address;
 };
 
 static int ksm_walk_test(unsigned long addr, unsigned long next, struct mm_walk *walk)
 {
 	struct vm_area_struct *vma = walk->vma;
-	struct ksm_walk_private *private;
+	struct ksm_next_page_arg *private;
 
 	if (!(vma->vm_flags & VM_MERGEABLE))
 		return 1;
 
-	private = (struct ksm_walk_private *) walk->private;
-	private->address = vma->vm_end;
+	private = (struct ksm_next_page_arg *) walk->private;
+	private->addr = vma->vm_end;
 
 	if (!vma->anon_vma)
 		return 1;
@@ -2479,88 +2479,86 @@ static int ksm_walk_test(unsigned long addr, unsigned long next, struct mm_walk 
 	return 0;
 }
 
-static int ksm_pmd_entry(pmd_t *pmd, unsigned long addr,
-			    unsigned long end, struct mm_walk *walk)
+static int ksm_next_page_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned long end,
+		struct mm_walk *walk)
 {
-	struct mm_struct *mm = walk->mm;
+	struct ksm_next_page_arg *private = walk->private;
 	struct vm_area_struct *vma = walk->vma;
-	struct ksm_walk_private *private = (struct ksm_walk_private *) walk->private;
+	pte_t *start_ptep = NULL, *ptep, pte;
+	struct mm_struct *mm = walk->mm;
 	struct folio *folio;
-	pte_t *start_pte, *pte, ptent;
-	pmd_t pmde;
 	struct page *page;
 	spinlock_t *ptl;
-	int ret = 0;
+	pmd_t pmd;
 
 	if (ksm_test_exit(mm))
-		return 1;
+		return 0;
+	cond_resched();
 
-	ptl = pmd_lock(mm, pmd);
-	pmde = pmdp_get(pmd);
-
-	if (!pmd_present(pmde))
-		goto pmd_out;
-
-	if (!pmd_trans_huge(pmde))
-		goto pte_table;
-
-	page = vm_normal_page_pmd(vma, addr, pmde);
-
-	if (!page)
-		goto pmd_out;
-
-	folio = page_folio(page);
-	if (folio_is_zone_device(folio) || !folio_test_anon(folio))
-		goto pmd_out;
-
-	ret = 1;
-	folio_get(folio);
-	private->page = page + ((addr & (PMD_SIZE - 1)) >> PAGE_SHIFT);
-	private->folio = folio;
-	private->vma = vma;
-	private->address = addr;
-pmd_out:
-	spin_unlock(ptl);
-	return ret;
-
-pte_table:
-	spin_unlock(ptl);
-
-	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
-	if (!start_pte)
+	pmd = pmdp_get_lockless(pmdp);
+	if (!pmd_present(pmd))
 		return 0;
 
-	for (; addr < end; pte++, addr += PAGE_SIZE) {
-		ptent = ptep_get(pte);
+	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) && pmd_leaf(pmd)) {
+		ptl = pmd_lock(mm, pmdp);
+		pmd = pmdp_get(pmdp);
 
-		if (!pte_present(ptent))
+		if (!pmd_present(pmd)) {
+			goto not_found_unlock;
+		} else if (pmd_leaf(pmd)) {
+			page = vm_normal_page_pmd(vma, addr, pmd);
+			if (!page)
+				goto not_found_unlock;
+			folio = page_folio(page);
+
+			if (folio_is_zone_device(folio) || !folio_test_anon(folio))
+				goto not_found_unlock;
+
+			page += ((addr & (PMD_SIZE - 1)) >> PAGE_SHIFT);
+			goto found_unlock;
+		}
+		spin_unlock(ptl);
+	}
+
+	start_ptep = pte_offset_map_lock(mm, pmdp, addr, &ptl);
+	if (!start_ptep)
+		return 0;
+
+	for (ptep = start_ptep; addr < end; ptep++, addr += PAGE_SIZE) {
+		pte = ptep_get(ptep);
+
+		if (!pte_present(pte))
 			continue;
 
-		page = vm_normal_page(vma, addr, ptent);
-
+		page = vm_normal_page(vma, addr, pte);
 		if (!page)
 			continue;
-
 		folio = page_folio(page);
+
 		if (folio_is_zone_device(folio) || !folio_test_anon(folio))
 			continue;
-
-		ret = 1;
-		folio_get(folio);
-		private->page = page;
-		private->folio = folio;
-		private->vma = vma;
-		private->address = addr;
-		break;
+		goto found_unlock;
 	}
-	pte_unmap_unlock(start_pte, ptl);
 
-	cond_resched();
-	return ret;
+not_found_unlock:
+	spin_unlock(ptl);
+	if (start_ptep)
+		pte_unmap(start_ptep);
+	return 0;
+found_unlock:
+	folio_get(folio);
+	spin_unlock(ptl);
+	if (start_ptep)
+		pte_unmap(start_ptep);
+	private->page = page;
+	private->folio = folio;
+	private->addr = addr;
+	private->vma = vma;
+	return 1;
 }
 
-struct mm_walk_ops walk_ops = {
-	.pmd_entry = ksm_pmd_entry,
+struct mm_walk_ops ksm_next_page_ops = {
+	.pmd_entry = ksm_next_page_pmd_entry,
 	.test_walk = ksm_walk_test,
 	.walk_lock = PGWALK_RDLOCK,
 };
@@ -2571,7 +2569,7 @@ static struct ksm_rmap_item *scan_get_next_rmap_item(struct page **page)
 	struct ksm_mm_slot *mm_slot;
 	struct mm_slot *slot;
 	struct ksm_rmap_item *rmap_item;
-	struct ksm_walk_private walk_private;
+	struct ksm_next_page_arg ksm_next_page_arg;
 	int nid;
 
 	if (list_empty(&ksm_mm_head.slot.mm_node))
@@ -2643,19 +2641,21 @@ next_mm:
 
 	while (true) {
 		struct folio *folio;
+		int found;
 
-		walk_private.page = NULL;
-		walk_private.folio = NULL;
-		walk_private.address = ksm_scan.address;
+		ksm_next_page_arg.page = NULL;
+		ksm_next_page_arg.folio = NULL;
+		ksm_next_page_arg.addr = ksm_scan.address;
 
-		walk_page_range(mm, ksm_scan.address, -1, &walk_ops, (void *) &walk_private);
-		ksm_scan.address = walk_private.address;
-		if (!walk_private.page)
+		found = walk_page_range(mm, ksm_scan.address, -1, &ksm_next_page_ops, (void *) &ksm_next_page_arg);
+		VM_WARN_ON_ONCE(found < 0);
+		ksm_scan.address = ksm_next_page_arg.addr;
+		if (!ksm_next_page_arg.page)
 			break;
 
-		folio = walk_private.folio;
-		flush_anon_page(walk_private.vma, walk_private.page, ksm_scan.address);
-		flush_dcache_page(walk_private.page);
+		folio = ksm_next_page_arg.folio;
+		flush_anon_page(ksm_next_page_arg.vma, ksm_next_page_arg.page, ksm_scan.address);
+		flush_dcache_page(ksm_next_page_arg.page);
 		rmap_item = get_next_rmap_item(mm_slot,
 			ksm_scan.rmap_list, ksm_scan.address);
 		if (rmap_item) {
@@ -2668,7 +2668,7 @@ next_mm:
 				continue;
 			}
 
-			*page = walk_private.page;
+			*page = ksm_next_page_arg.page;
 		} else {
 			folio_put(folio);
 		}
