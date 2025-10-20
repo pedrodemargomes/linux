@@ -26,6 +26,7 @@
 #include <linux/rmap.h>
 #include <linux/spinlock.h>
 #include <linux/xxhash.h>
+#include <linux/crc64.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
@@ -1237,7 +1238,11 @@ static u32 calc_checksum(struct page *page)
 {
 	u32 checksum;
 	void *addr = kmap_local_page(page);
-	checksum = xxhash(addr, PAGE_SIZE, 0);
+	// #ifdef CONFIG_CRC64_ARCH
+	checksum = crc64_nvme(0, addr, PAGE_SIZE);
+	// #else
+	// checksum = xxhash(addr, PAGE_SIZE, 0);
+	// #endif
 	kunmap_local(addr);
 	return checksum;
 }
