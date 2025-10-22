@@ -2475,6 +2475,7 @@ static int ksm_next_page_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned lon
 
 	if (ksm_test_exit(mm))
 		return 0;
+
 	cond_resched();
 
 	pmd = pmdp_get_lockless(pmdp);
