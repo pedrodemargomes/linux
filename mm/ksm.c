@@ -2187,6 +2187,23 @@ struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_ite
 		}
 	}
 
+	struct rb_node *temp = rb_first(root);
+	struct ksm_rmap_item *temp_rmap;
+	int eqCount = 0;
+	while (temp) {
+		temp_rmap = rb_entry(temp, struct ksm_rmap_item, node);
+		struct page *p = get_mergeable_page(temp_rmap);
+		if (!p)
+			goto out;
+		if (!memcmp_pages(page, p))
+			eqCount++;
+		put_page(p);
+out:
+		temp = rb_next(temp);
+	}
+	if (eqCount)
+		pr_err("eqCount: %d", eqCount);
+
 	rmap_item->address |= UNSTABLE_FLAG;
 	rmap_item->address |= (ksm_scan.seqnr & SEQNR_MASK);
 	DO_NUMA(rmap_item->nid = nid);
