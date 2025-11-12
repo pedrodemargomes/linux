@@ -168,6 +168,7 @@ struct ksm_stable_node {
 		};
 	};
 	struct hlist_head hlist;
+	unsigned int checksum;
 	union {
 		unsigned long kpfn;
 		unsigned long chain_prune_time;
@@ -1019,6 +1020,22 @@ stale:
 	return NULL;
 }
 
+static int cmp_ksm_pages(unsigned int checksum, unsigned int oldchecksum, struct page *page, struct page *tree_page) {
+	if (checksum < oldchecksum)
+		return -1;
+	else if (checksum > oldchecksum)
+		return 1;
+	else {
+		int ret = memcmp_pages(page, tree_page);
+		if (ret < 0)
+			return -1;
+		else if (ret > 0)
+			return 1;
+		else
+			return 0;
+	}
+}
+
 /*
  * Removing rmap_item from stable or unstable tree.
  * This function will clean the information from the stable/unstable tree.
@@ -1831,6 +1848,7 @@ static struct folio *stable_tree_search(struct page *page)
 	struct ksm_stable_node *stable_node, *stable_node_dup;
 	struct ksm_stable_node *page_node;
 	struct folio *folio;
+	unsigned int checksum;
 
 	folio = page_folio(page);
 	page_node = folio_stable_node(folio);
@@ -1846,6 +1864,7 @@ again:
 	new = &root->rb_node;
 	parent = NULL;
 
+	checksum = calc_checksum(page);
 	while (*new) {
 		struct folio *tree_folio;
 		int ret;
@@ -1866,7 +1885,8 @@ again:
 			goto again;
 		}
 
-		ret = memcmp_pages(page, &tree_folio->page);
+		ret = cmp_ksm_pages(checksum, stable_node->checksum, page, &tree_folio->page);
+		// ret = memcmp_pages(page, &tree_folio->page);
 		folio_put(tree_folio);
 
 		parent = *new;
@@ -2053,6 +2073,7 @@ again:
 	parent = NULL;
 	new = &root->rb_node;
 
+	unsigned int checksum = calc_checksum(&kfolio->page);
 	while (*new) {
 		struct folio *tree_folio;
 		int ret;
@@ -2073,7 +2094,8 @@ again:
 			goto again;
 		}
 
-		ret = memcmp_pages(&kfolio->page, &tree_folio->page);
+		ret = cmp_ksm_pages(checksum, stable_node->checksum, &kfolio->page, &tree_folio->page);
+		// ret = memcmp_pages(&kfolio->page, &tree_folio->page);
 		folio_put(tree_folio);
 
 		parent = *new;
@@ -2111,6 +2133,7 @@ again:
 		stable_node_chain_add_dup(stable_node_dup, stable_node);
 	}
 
+	stable_node_dup->checksum = calc_checksum(&kfolio->page);
 	folio_set_stable_node(kfolio, stable_node_dup);
 
 	return stable_node_dup;
@@ -2139,11 +2162,13 @@ struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_ite
 	struct rb_root *root;
 	struct rb_node *parent = NULL;
 	int nid;
+	unsigned int checksum;
 
 	nid = get_kpfn_nid(page_to_pfn(page));
 	root = root_unstable_tree + nid;
 	new = &root->rb_node;
 
+	checksum = calc_checksum(page);
 	while (*new) {
 		struct ksm_rmap_item *tree_rmap_item;
 		struct page *tree_page;
@@ -2163,7 +2188,8 @@ struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_ite
 			return NULL;
 		}
 
-		ret = memcmp_pages(page, tree_page);
+		ret = cmp_ksm_pages(checksum, tree_rmap_item->oldchecksum, page, tree_page);
+		// ret = memcmp_pages(page, tree_page);
 
 		parent = *new;
 		if (ret < 0) {
