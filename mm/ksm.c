@@ -1822,7 +1822,7 @@ static __always_inline struct folio *chain(struct ksm_stable_node **s_n_d,
  * This function returns the stable tree node of identical content if found,
  * -EBUSY if the stable node's page is being migrated, NULL otherwise.
  */
-static struct folio *stable_tree_search(struct page *page)
+static noinline struct folio *stable_tree_search(struct page *page)
 {
 	int nid;
 	struct rb_root *root;
@@ -2036,7 +2036,7 @@ chain_append:
  * This function returns the stable tree node just allocated on success,
  * NULL otherwise.
  */
-static struct ksm_stable_node *stable_tree_insert(struct folio *kfolio)
+static noinline struct ksm_stable_node *stable_tree_insert(struct folio *kfolio)
 {
 	int nid;
 	unsigned long kpfn;
@@ -2130,7 +2130,7 @@ again:
  * This function does both searching and inserting, because they share
  * the same walking algorithm in an rbtree.
  */
-static
+static noinline
 struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_item,
 					      struct page *page,
 					      struct page **tree_pagep)
