@@ -168,7 +168,7 @@ struct ksm_stable_node {
 		};
 	};
 	struct hlist_head hlist;
-	unsigned int checksum;
+	unsigned long checksum;
 	union {
 		unsigned long kpfn;
 		unsigned long chain_prune_time;
@@ -209,7 +209,7 @@ struct ksm_rmap_item {
 	};
 	struct mm_struct *mm;
 	unsigned long address;		/* + low bits used for flags below */
-	unsigned int oldchecksum;	/* when unstable */
+	unsigned long oldchecksum;	/* when unstable */
 	rmap_age_t age;
 	rmap_age_t remaining_skips;
 	union {
@@ -286,7 +286,7 @@ static unsigned int ksm_thread_pages_to_scan = DEFAULT_PAGES_TO_SCAN;
 static unsigned int ksm_thread_sleep_millisecs = 20;
 
 /* Checksum of an empty (zeroed) page */
-static unsigned int zero_checksum __read_mostly;
+static unsigned long zero_checksum __read_mostly;
 
 /* Whether to merge empty (zeroed) pages with actual zero pages */
 static bool ksm_use_zero_pages __read_mostly;
@@ -1020,7 +1020,7 @@ stale:
 	return NULL;
 }
 
-static int cmp_ksm_pages(unsigned int checksum, unsigned int oldchecksum, struct page *page, struct page *tree_page) {
+static int cmp_ksm_pages(unsigned long checksum, unsigned long oldchecksum, struct page *page, struct page *tree_page) {
 	if (checksum < oldchecksum)
 		return -1;
 	else if (checksum > oldchecksum)
@@ -1277,9 +1277,9 @@ error:
 }
 #endif /* CONFIG_SYSFS */
 
-static u32 calc_checksum(struct page *page)
+static unsigned long calc_checksum(struct page *page)
 {
-	u32 checksum;
+	unsigned long checksum;
 	void *addr = kmap_local_page(page);
 	checksum = xxhash(addr, PAGE_SIZE, 0);
 	kunmap_local(addr);
@@ -1839,7 +1839,7 @@ static __always_inline struct folio *chain(struct ksm_stable_node **s_n_d,
  * This function returns the stable tree node of identical content if found,
  * -EBUSY if the stable node's page is being migrated, NULL otherwise.
  */
-static noinline struct folio *stable_tree_search(struct page *page)
+static noinline struct folio *stable_tree_search(struct page *page, unsigned long checksum)
 {
 	int nid;
 	struct rb_root *root;
@@ -1848,7 +1848,6 @@ static noinline struct folio *stable_tree_search(struct page *page)
 	struct ksm_stable_node *stable_node, *stable_node_dup;
 	struct ksm_stable_node *page_node;
 	struct folio *folio;
-	unsigned int checksum;
 
 	folio = page_folio(page);
 	page_node = folio_stable_node(folio);
@@ -1864,7 +1863,6 @@ again:
 	new = &root->rb_node;
 	parent = NULL;
 
-	checksum = calc_checksum(page);
 	while (*new) {
 		struct folio *tree_folio;
 		int ret;
@@ -2073,7 +2071,7 @@ again:
 	parent = NULL;
 	new = &root->rb_node;
 
-	unsigned int checksum = calc_checksum(&kfolio->page);
+	unsigned long checksum = calc_checksum(&kfolio->page);
 	while (*new) {
 		struct folio *tree_folio;
 		int ret;
@@ -2133,7 +2131,7 @@ again:
 		stable_node_chain_add_dup(stable_node_dup, stable_node);
 	}
 
-	stable_node_dup->checksum = calc_checksum(&kfolio->page);
+	stable_node_dup->checksum = checksum;
 	folio_set_stable_node(kfolio, stable_node_dup);
 
 	return stable_node_dup;
@@ -2162,13 +2160,11 @@ struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_ite
 	struct rb_root *root;
 	struct rb_node *parent = NULL;
 	int nid;
-	unsigned int checksum;
 
 	nid = get_kpfn_nid(page_to_pfn(page));
 	root = root_unstable_tree + nid;
 	new = &root->rb_node;
 
-	checksum = calc_checksum(page);
 	while (*new) {
 		struct ksm_rmap_item *tree_rmap_item;
 		struct page *tree_page;
@@ -2188,7 +2184,7 @@ struct ksm_rmap_item *unstable_tree_search_insert(struct ksm_rmap_item *rmap_ite
 			return NULL;
 		}
 
-		ret = cmp_ksm_pages(checksum, tree_rmap_item->oldchecksum, page, tree_page);
+		ret = cmp_ksm_pages(rmap_item->oldchecksum, tree_rmap_item->oldchecksum, page, tree_page);
 		// ret = memcmp_pages(page, tree_page);
 
 		parent = *new;
@@ -2278,7 +2274,7 @@ static void cmp_and_merge_page(struct page *page, struct ksm_rmap_item *rmap_ite
 	struct page *tree_page = NULL;
 	struct ksm_stable_node *stable_node;
 	struct folio *kfolio;
-	unsigned int checksum;
+	unsigned long checksum;
 	int err;
 	bool max_page_sharing_bypass = false;
 
@@ -2320,7 +2316,7 @@ static void cmp_and_merge_page(struct page *page, struct ksm_rmap_item *rmap_ite
 	}
 
 	/* Start by searching for the folio in the stable tree */
-	kfolio = stable_tree_search(page);
+	kfolio = stable_tree_search(page, checksum);
 	if (kfolio == folio && rmap_item->head == stable_node) {
 		folio_put(kfolio);
 		return;
