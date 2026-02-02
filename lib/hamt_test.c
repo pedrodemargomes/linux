@@ -3,6 +3,7 @@
 #include <linux/prandom.h>
 #include <linux/slab.h>
 #include <asm/timex.h>
+#include <linux/hamt.h>
 
 static int __init hamt_test_init(void)
 {

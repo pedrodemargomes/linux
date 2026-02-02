@@ -1,6 +1,8 @@
 #ifndef	_LINUX_HAMT_H
 #define	_LINUX_HAMT_H
 
+#define BUCKET_SIZE 16
+
 struct hamt_leaf {
 	u32 key;
 	void *bucket;
