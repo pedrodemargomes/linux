@@ -24,7 +24,7 @@ static int __init hamt_test_init(void)
 
 	printk("inserting...\n");
 	for (unsigned int i = 0; tests[i]; i++) 
-		hamt_insert(&hroot, (void *)tests[i], tests[i]);
+		hamt_insert(&hroot, (void *)&tests[i], tests[i]);
 	
 	printk("searching...\n");
 	for (unsigned int i = 0; tests[i]; i++) 
@@ -38,7 +38,7 @@ static int __init hamt_test_init(void)
 	for (unsigned int i = 0; tests[i]; i++) 
 		hamt_search(&hroot, tests[i]);	
 
-	free(tests);
+	kfree(tests);
 	return 0; /* Fail will directly unload the module */
 }
 
@@ -53,8 +53,3 @@ module_exit(hamt_test_exit)
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pedro Demarchi Gomes");
 MODULE_DESCRIPTION("HAMT test");
-
-
-int main() {
-	
-}

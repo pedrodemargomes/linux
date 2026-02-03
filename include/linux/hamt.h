@@ -1,6 +1,8 @@
 #ifndef	_LINUX_HAMT_H
 #define	_LINUX_HAMT_H
 
+#include <linux/types.h>
+
 #define BUCKET_SIZE 16
 
 struct hamt_leaf {
@@ -19,6 +21,6 @@ struct hamt_root {
 
 int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key);
 void *hamt_search(struct hamt_root *hroot, u32 key);
-void *hamt_remove(struct hamt_root *hroot, u32 key);
+void hamt_remove(struct hamt_root *hroot, u32 key);
 
 #endif	/* _LINUX_HAMT_H */
