@@ -17,6 +17,9 @@ int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
 	int level = 0;
 	int keymasked = key;
 
+	struct hamt_entry *entry = kmalloc(sizeof(struct hamt_entry), GFP_KERNEL);
+	entry->value = value;
+
 	for (;;) {
 		bucket_key = keymasked & BUCKET_MASK;
 		if(IS_LEAF(hamtp->hashmap[bucket_key]))
@@ -33,7 +36,8 @@ int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
 insert_on_empty:
 	struct hamt_leaf *hamt_leaf = kmalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
 	hamt_leaf->key = key;
-	hamt_leaf->bucket = value; // TODO: INSERT AT THE END OF THE BUCKET
+	INIT_HLIST_HEAD(&hamt_leaf->bucket);
+	hlist_add_head(&entry->node, &hamt_leaf->bucket);
 	hamtp->hashmap[bucket_key] = (void *) SET_LEAF(hamt_leaf);
 	return 0;
 
@@ -42,9 +46,9 @@ insert_on_leaf:
 	struct hamt_leaf *hamt_old_leaf = (struct hamt_leaf *) GET_POINTER(hamtp->hashmap[bucket_key]);
 	
 	if (hamt_old_leaf->key == key) {
-		// TODO: INSERT AT THE END OF THE BUCKET
-		printk("HASH COLISION\n");
-		return 1;
+		hlist_add_head(&entry->node, &hamt_old_leaf->bucket);
+		// printk("HASH COLISION\n");
+		return 0;
 	}
 
 	keymasked = keymasked >> BUCKET_SIZE_BITS;
@@ -59,7 +63,7 @@ insert_on_leaf:
 	}
 
 	if(level == MAX_LEVEL-1) {
-		// TODO: INSERT AT THE END OF THE BUCKET
+		// hlist_add_head(entry, &hamt_old_leaf->bucket);
 		printk("HASH COLISION\n");
 		return 1;
 	}
@@ -68,7 +72,8 @@ insert_on_leaf:
 	// New leaf to insert	
 	struct hamt_leaf *hamt_new_leaf = kmalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
 	hamt_new_leaf->key = key;
-	hamt_new_leaf->bucket = value; // TODO: INSERT AT THE END OF THE BUCKET
+	INIT_HLIST_HEAD(&hamt_new_leaf->bucket);
+	hlist_add_head(&entry->node, &hamt_new_leaf->bucket);
 	
 	struct hamt_node *hamt_new_node = kmalloc(sizeof(struct hamt_node), GFP_KERNEL);
 	hamtp->hashmap[bucket_key] = hamt_new_node;
@@ -78,18 +83,18 @@ insert_on_leaf:
 	return 0;
 }
 
-void *hamt_search(struct hamt_root *hroot, u32 key) {
+struct hlist_head *hamt_search(struct hamt_root *hroot, u32 key) {
 	int keymasked = key;
 	struct hamt_node *hnode = &hroot->root;
 	while (1) {
 		if(IS_LEAF(hnode->hashmap[keymasked & BUCKET_MASK])) {
 			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(hnode->hashmap[keymasked & BUCKET_MASK]);
-			printk("hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
-			return hleaf->bucket;
+			// printk("hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
+			return &hleaf->bucket;
 		}	
 		// Not found
 		if (!GET_POINTER(hnode->hashmap[keymasked & BUCKET_MASK])) {
-			printk("%X %d NOT FOUND SEARCH\n", key, key);
+			// printk("%X %d NOT FOUND SEARCH\n", key, key);
 			return NULL;
 		}
 
@@ -109,22 +114,20 @@ void hamt_remove(struct hamt_root *hroot, u32 key) {
 	int keymasked = key;
 	struct hamt_node *hnode = &hroot->root;
 	struct hamt_node *path[MAX_LEVEL] = {NULL};
-	void *bucket;
 	int level = 0;
 
 	while (1) {
 		path[level++] = hnode;
 		if(IS_LEAF(hnode->hashmap[keymasked & BUCKET_MASK])) {
 			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(hnode->hashmap[keymasked & BUCKET_MASK]);
-			printk("removing hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
+			// printk("removing hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
 			hnode->hashmap[keymasked & BUCKET_MASK] = NULL;
-			bucket = hleaf->bucket;
 			kfree(hleaf);
 			goto out;
 		}
 		// Not found
 		if (!GET_POINTER(hnode->hashmap[keymasked & BUCKET_MASK])) {
-			printk("%X %d NOT FOUND REMOVE\n", key, key);
+			// printk("%X %d NOT FOUND REMOVE\n", key, key);
 			return ;
 		}
 
