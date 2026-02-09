@@ -6,9 +6,9 @@
 #define MAX_LEVEL (32/BUCKET_SIZE_BITS)
 
 #define TAG_MASK 0x1
-#define IS_LEAF(x) (((uintptr_t)x) & 0x1)
-#define SET_LEAF(x) (((uintptr_t)x) | 0x1)
-#define GET_POINTER(x) (((uintptr_t)x) & ~TAG_MASK)
+#define IS_LEAF(x) (((unsigned long)x) & 0x1)
+#define SET_LEAF(x) (((unsigned long)x) | 0x1)
+#define GET_POINTER(x) (((unsigned long)x) & ~TAG_MASK)
 
 // value pointer cannot be NULL
 int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
@@ -17,8 +17,11 @@ int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
 	int level = 0;
 	int keymasked = key;
 
-	struct hamt_entry *entry = kmalloc(sizeof(struct hamt_entry), GFP_KERNEL);
+	struct hamt_entry *entry = kzalloc(sizeof(struct hamt_entry), GFP_KERNEL);
 	entry->value = value;
+
+	if(IS_LEAF(entry))
+		panic("KMALLOC NOT ALIGNED");
 
 	for (;;) {
 		bucket_key = keymasked & BUCKET_MASK;
@@ -34,7 +37,9 @@ int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
 	}
 
 insert_on_empty:
-	struct hamt_leaf *hamt_leaf = kmalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
+	struct hamt_leaf *hamt_leaf = kzalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
+	if(IS_LEAF(hamt_leaf))
+		panic("KMALLOC NOT ALIGNED");
 	hamt_leaf->key = key;
 	INIT_HLIST_HEAD(&hamt_leaf->bucket);
 	hlist_add_head(&entry->node, &hamt_leaf->bucket);
@@ -53,7 +58,9 @@ insert_on_leaf:
 
 	keymasked = keymasked >> BUCKET_SIZE_BITS;
 	while ( (level < (MAX_LEVEL-1)) && ((hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK) == (keymasked & BUCKET_MASK)) {
-		struct hamt_node *hamt_new_node = kmalloc(sizeof(struct hamt_node), GFP_KERNEL);
+		struct hamt_node *hamt_new_node = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
+		if(IS_LEAF(hamt_new_node))
+			panic("KMALLOC NOT ALIGNED");
 		hamtp->hashmap[bucket_key] = hamt_new_node;
 		
 		hamtp = hamt_new_node;
@@ -70,12 +77,16 @@ insert_on_leaf:
 
 
 	// New leaf to insert	
-	struct hamt_leaf *hamt_new_leaf = kmalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
+	struct hamt_leaf *hamt_new_leaf = kzalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
+	if(IS_LEAF(hamt_new_leaf))
+			panic("KMALLOC NOT ALIGNED");
 	hamt_new_leaf->key = key;
 	INIT_HLIST_HEAD(&hamt_new_leaf->bucket);
 	hlist_add_head(&entry->node, &hamt_new_leaf->bucket);
 	
-	struct hamt_node *hamt_new_node = kmalloc(sizeof(struct hamt_node), GFP_KERNEL);
+	struct hamt_node *hamt_new_node = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
+	if(IS_LEAF(hamt_new_node))
+			panic("KMALLOC NOT ALIGNED");
 	hamtp->hashmap[bucket_key] = hamt_new_node;
 	hamt_new_node->hashmap[keymasked & BUCKET_MASK] = (void *) SET_LEAF(hamt_new_leaf);
 	hamt_new_node->hashmap[(hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK] = (void *)SET_LEAF(hamt_old_leaf);
