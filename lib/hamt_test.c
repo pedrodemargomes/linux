@@ -18,7 +18,7 @@ static unsigned int reverse_bits(unsigned int x) {
     return x;
 }
 
-static int __init hamt_test_init(void)
+static int test_insert_search_del(void)
 {
 	struct hamt_root hroot = {0};
 
@@ -74,6 +74,35 @@ static int __init hamt_test_init(void)
 	}
 
 	kfree(tests);
+	return 0; /* Fail will directly unload the module */
+}
+
+static void test_remove_path(void) 
+{
+	unsigned int x;
+	struct hamt_root hroot = {0};
+	prandom_seed_state(&rnd, seed);
+
+	unsigned int tests[2];
+	x = (unsigned int) prandom_u32_state(&rnd) & ~0xF;
+	tests[0] = reverse_bits(x);
+	tests[1] = reverse_bits(x+1);
+
+	hamt_insert(&hroot, (void *)&tests[0], tests[0]);
+	hamt_insert(&hroot, (void *)&tests[1], tests[1]);
+	
+	hamt_remove(&hroot, tests[0]);	
+	hamt_remove(&hroot, tests[1]);
+	printk("hroot: %px\n", &hroot);
+}
+
+static int __init hamt_test_init(void)
+{
+	printk("test_insert_search_del\n");
+	test_insert_search_del();
+	
+	printk("test_remove_path\n");
+	test_remove_path();
 	return 0; /* Fail will directly unload the module */
 }
 
