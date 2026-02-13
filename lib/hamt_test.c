@@ -34,10 +34,10 @@ static int test_insert_search_del(void)
 	unsigned int size = 10000*16;
 	//int tests[] = {0x0111, 0x1111, 0x2111, 0x3111, 0x3011, 0x0021, NULL};
 	unsigned int *tests = kmalloc_array(size, sizeof(unsigned int), GFP_KERNEL);
-	for (unsigned int i = 0; i < size; i+=16) {
-		unsigned int x = (unsigned int) prandom_u32_state(&rnd) & ~0xF;
+	for (unsigned int i = 0; i < size; i+=256) {
+		unsigned int x = (unsigned int) prandom_u32_state(&rnd) & ~0xFF;
 		tests[i] = reverse_bits(x);
-		for (unsigned int j = 1; j < 16; j++)
+		for (unsigned int j = 1; j < 256; j++)
 			tests[i+j] = reverse_bits(x+j);
 		// printk("%X (%u) ", tests[i], tests[i]);
 	}
@@ -92,7 +92,7 @@ static void test_remove_path(void)
 	prandom_seed_state(&rnd, seed);
 
 	unsigned int tests[2];
-	x = (unsigned int) prandom_u32_state(&rnd) & ~0xF;
+	x = (unsigned int) prandom_u32_state(&rnd) & ~0xFF;
 	tests[0] = reverse_bits(x);
 	tests[1] = reverse_bits(x+1);
 
