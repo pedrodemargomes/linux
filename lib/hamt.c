@@ -129,6 +129,17 @@ void hamt_remove(struct hamt_root *hroot, u32 key) {
 			// printk("removing hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
 			hnode->hashmap[keymasked & BUCKET_MASK] = NULL;
 			hnode->len--;
+
+			// +++ DEBUG +++
+			struct hamt_entry *entry;
+			struct hlist_node *n;
+			hlist_for_each_entry_safe(entry, n, &hleaf->bucket, node) {
+				//printk("entry->value: %u\n", *((unsigned int *)entry->value));
+				hlist_del(&entry->node);
+				kfree(entry);
+			}
+			// ++++++++++++
+
 			kfree(hleaf);
 			goto out;
 		}

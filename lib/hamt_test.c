@@ -99,12 +99,12 @@ static void test_remove_path(void)
 	hamt_insert(hroot, (void *)&tests[0], tests[0]);
 	print_node(&hroot->root);
 	hamt_insert(hroot, (void *)&tests[1], tests[1]);
-	print_node(&hroot->root);
+	// print_node(&hroot->root);
 
 	hamt_remove(hroot, tests[0]);
-	print_node(&hroot->root);
+	// print_node(&hroot->root);
 	hamt_remove(hroot, tests[1]);
-	print_node(&hroot->root);
+	//print_node(&hroot->root);
 
 	kfree(hroot);
 }
