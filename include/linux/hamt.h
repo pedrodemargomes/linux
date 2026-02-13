@@ -4,7 +4,7 @@
 #include <linux/types.h>
 #include <linux/list.h>
 
-#define BUCKET_SIZE 16
+#define BUCKET_SIZE 256
 
 struct hamt_entry {
 	struct hlist_node node;

@@ -18,9 +18,16 @@ static unsigned int reverse_bits(unsigned int x) {
     return x;
 }
 
+static void print_node(struct hamt_node *node)
+{
+	printk("len: %d\n", node->len);
+	for (int i = 0; i < BUCKET_SIZE; i++)
+		printk("%hhx: %px\n", i, node->hashmap[i]);
+}
+
 static int test_insert_search_del(void)
 {
-	struct hamt_root hroot = {0};
+	struct hamt_root *hroot = kzalloc(sizeof(struct hamt_root), GFP_KERNEL);
 
 	prandom_seed_state(&rnd, seed);
 
@@ -39,17 +46,17 @@ static int test_insert_search_del(void)
 
 	printk("inserting...\n");
 	for (unsigned int i = 0; tests[i]; i++) {
-		hamt_insert(&hroot, (void *)&tests[i], tests[i]);
+		hamt_insert(hroot, (void *)&tests[i], tests[i]);
 	}
 
 	printk("searching...\n");
 	for (unsigned int i = 0; tests[i]; i++) {
 		struct hamt_entry *entry;
-		struct hlist_head *head = hamt_search(&hroot, tests[i]);
+		struct hlist_head *head = hamt_search(hroot, tests[i]);
 
 		if (!head)
 			printk("ERRO: hamt_search %u not found\n", tests[i]);
-		else {	
+		else {
 			hlist_for_each_entry(entry, head, node) {
 				// printk("entry->value: %u\n", *((unsigned int *)entry->value));
 			}
@@ -58,12 +65,12 @@ static int test_insert_search_del(void)
 
 	printk("removing...\n");
 	for (unsigned int i = 0; tests[i]; i++)
-		hamt_remove(&hroot, tests[i]);
+		hamt_remove(hroot, tests[i]);
 
 	printk("searching...\n");
 	for (unsigned int i = 0; tests[i]; i++) {
 		struct hamt_entry *entry;
-		struct hlist_head *head = hamt_search(&hroot, tests[i]);
+		struct hlist_head *head = hamt_search(hroot, tests[i]);
 
 		if (head) {
 			printk("ERRO: hamt_search %u not found\n", tests[i]);
@@ -74,13 +81,14 @@ static int test_insert_search_del(void)
 	}
 
 	kfree(tests);
+	kfree(hroot);
 	return 0; /* Fail will directly unload the module */
 }
 
-static void test_remove_path(void) 
+static void test_remove_path(void)
 {
 	unsigned int x;
-	struct hamt_root hroot = {0};
+	struct hamt_root *hroot = kzalloc(sizeof(struct hamt_root), GFP_KERNEL);
 	prandom_seed_state(&rnd, seed);
 
 	unsigned int tests[2];
@@ -88,19 +96,24 @@ static void test_remove_path(void)
 	tests[0] = reverse_bits(x);
 	tests[1] = reverse_bits(x+1);
 
-	hamt_insert(&hroot, (void *)&tests[0], tests[0]);
-	hamt_insert(&hroot, (void *)&tests[1], tests[1]);
-	
-	hamt_remove(&hroot, tests[0]);	
-	hamt_remove(&hroot, tests[1]);
-	printk("hroot: %px\n", &hroot);
+	hamt_insert(hroot, (void *)&tests[0], tests[0]);
+	print_node(&hroot->root);
+	hamt_insert(hroot, (void *)&tests[1], tests[1]);
+	print_node(&hroot->root);
+
+	hamt_remove(hroot, tests[0]);
+	print_node(&hroot->root);
+	hamt_remove(hroot, tests[1]);
+	print_node(&hroot->root);
+
+	kfree(hroot);
 }
 
 static int __init hamt_test_init(void)
 {
 	printk("test_insert_search_del\n");
 	test_insert_search_del();
-	
+
 	printk("test_remove_path\n");
 	test_remove_path();
 	return 0; /* Fail will directly unload the module */
