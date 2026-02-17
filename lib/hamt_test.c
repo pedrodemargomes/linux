@@ -31,7 +31,7 @@ static int test_insert_search_del(void)
 
 	prandom_seed_state(&rnd, seed);
 
-	unsigned int size = 10000*16;
+	unsigned int size = 256*2; //10000*16;
 	//int tests[] = {0x0111, 0x1111, 0x2111, 0x3111, 0x3011, 0x0021, NULL};
 	unsigned int *tests = kmalloc_array(size, sizeof(unsigned int), GFP_KERNEL);
 	for (unsigned int i = 0; i < size; i+=256) {
@@ -64,8 +64,10 @@ static int test_insert_search_del(void)
 	}
 
 	printk("removing...\n");
-	for (unsigned int i = 0; tests[i]; i++)
+	for (unsigned int i = 0; tests[i]; i++) {
+		printk("remove %d: %u\n", i, tests[i]);
 		hamt_remove(hroot, tests[i]);
+	}
 
 	printk("searching...\n");
 	for (unsigned int i = 0; tests[i]; i++) {

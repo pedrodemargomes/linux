@@ -3,6 +3,7 @@
 
 #include <linux/types.h>
 #include <linux/list.h>
+#include <linux/bitmap.h>
 
 #define BUCKET_SIZE 256
 
@@ -17,8 +18,9 @@ struct hamt_leaf {
 };
 
 struct hamt_node {
-	void *hashmap[BUCKET_SIZE];
-	u8 len;
+	u16 len;
+	DECLARE_BITMAP(index, BUCKET_SIZE);
+	void **hashmap;
 };
 
 struct hamt_root {
