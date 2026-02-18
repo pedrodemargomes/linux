@@ -20,15 +20,11 @@ struct hamt_leaf {
 struct hamt_node {
 	u16 len;
 	DECLARE_BITMAP(index, BUCKET_SIZE);
-	void **hashmap;
+	void *hashmap[];
 };
 
-struct hamt_root {
-	struct hamt_node root;
-};
-
-int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key);
-struct hlist_head *hamt_search(struct hamt_root *hroot, u32 key);
-void hamt_remove(struct hamt_root *hroot, u32 key);
+int hamt_insert(struct hamt_node **hamt_root, void *value, u32 key);
+struct hlist_head *hamt_search(struct hamt_node **hamt_root, u32 key);
+void hamt_remove(struct hamt_node **hamt_root, u32 key);
 
 #endif	/* _LINUX_HAMT_H */

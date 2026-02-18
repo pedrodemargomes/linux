@@ -10,18 +10,20 @@
 #define SET_LEAF(x) (((unsigned long)x) | 0x1)
 #define GET_POINTER(x) (((unsigned long)x) & ~TAG_MASK)
 
-static void *get_node(struct hamt_node *hamtp, u32 key) {
+static void **get_node(struct hamt_node *hamtp, u32 key) {
 	if (!test_bit(key, hamtp->index))
 		return NULL;
-	return (void *) hamtp->hashmap[bitmap_weight(hamtp->index, key)];
+	return (void **) &hamtp->hashmap[bitmap_weight(hamtp->index, key)];
 }
 
-static void set_node(struct hamt_node *hamtp, u32 key, void *node) {
+static void set_node(struct hamt_node **hamtpp, u32 key, void *node) {
+	struct hamt_node *hamtp = *hamtpp;
 	if (test_bit(key, hamtp->index)) {
 		hamtp->hashmap[bitmap_weight(hamtp->index, key)] = node;
-		printk("set_node hamtp: %px len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
+		//printk("set_node hamtp: %px len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
 	} else {
-		hamtp->hashmap = krealloc(hamtp->hashmap, (hamtp->len+1)*sizeof(void *), GFP_KERNEL);
+		*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len+1)*sizeof(void *), GFP_KERNEL);
+		hamtp = *hamtpp;
 		u32 k = bitmap_weight(hamtp->index, key);	
 		for (int i = hamtp->len; i > k; i--)
 			hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
@@ -30,13 +32,14 @@ static void set_node(struct hamt_node *hamtp, u32 key, void *node) {
 		hamtp->len++;
 		hamtp->hashmap[k] = node;
 		
-		printk("set_node hamtp: %p len: %d\n", hamtp, hamtp->len);
+		//printk("set_node hamtp: %p len: %d\n", hamtp, hamtp->len);
 	}
 }
 
-static int remove_node(struct hamt_node *hamtp, u32 key) {
+static int remove_node(struct hamt_node **hamtpp, u32 key) {
+	struct hamt_node *hamtp = *hamtpp;
 	if (!test_bit(key, hamtp->index)) {
-		printk("remove_node: key not present in node\n");
+		//printk("remove_node: key not present in node\n");
 		return 1;
 	}
 
@@ -45,20 +48,21 @@ static int remove_node(struct hamt_node *hamtp, u32 key) {
 		hamtp->hashmap[i] = hamtp->hashmap[i+1]; 
 
 	// Realloc shrink hashmap
-	hamtp->hashmap = krealloc(hamtp->hashmap, (hamtp->len-1)*sizeof(void *), GFP_KERNEL);
+	*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len-1)*sizeof(void *), GFP_KERNEL);
+	hamtp = *hamtpp;
 
 	clear_bit(key, hamtp->index);
 	hamtp->len--;
 
-	printk("remove_node hamtp: %p len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
+	// printk("remove_node hamtp: %p len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
 	return 0;
 }
 
 // value pointer cannot be NULL
-int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
+int hamt_insert(struct hamt_node **hamt_root, void *value, u32 key) {
 	int bucket_key;
-	void *n;
-	struct hamt_node *hamtp = &hamt_root->root;
+	void **n;
+	struct hamt_node **hamtp = hamt_root;
 	int level = 0;
 	int keymasked = key;
 
@@ -67,15 +71,15 @@ int hamt_insert(struct hamt_root *hamt_root, void *value, u32 key) {
 
 	for (;;) {
 		bucket_key = keymasked & BUCKET_MASK;
-		n = get_node(hamtp, bucket_key); 
+		n = get_node(*hamtp, bucket_key); 
 		
-		if(IS_LEAF(n))
-			goto insert_on_leaf;
-
-		if (!GET_POINTER(n))
+		if ( !n || !GET_POINTER(*n))
 			goto insert_on_empty;
 
-		hamtp = (struct hamt_node *) GET_POINTER(n);
+		if(IS_LEAF(*n))
+			goto insert_on_leaf;
+
+		hamtp = (struct hamt_node **) n;
 		keymasked = keymasked >> BUCKET_SIZE_BITS;
 		level++;
 	}
@@ -90,7 +94,7 @@ insert_on_empty:
 
 insert_on_leaf:
 	// Old existing leaf
-	struct hamt_leaf *hamt_old_leaf = (struct hamt_leaf *) GET_POINTER(n);
+	struct hamt_leaf *hamt_old_leaf = (struct hamt_leaf *) GET_POINTER(*n);
 
 	if (hamt_old_leaf->key == key) {
 		hlist_add_head(&entry->node, &hamt_old_leaf->bucket);
@@ -102,8 +106,8 @@ insert_on_leaf:
 	while ( (level < (MAX_LEVEL-1)) && ((hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK) == (keymasked & BUCKET_MASK)) {
 		struct hamt_node *hamt_new_node = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
 		set_node(hamtp, bucket_key, hamt_new_node);
-
-		hamtp = hamt_new_node;
+		hamtp = (struct hamt_node **) get_node(*hamtp, bucket_key); 
+		
 		bucket_key = keymasked & BUCKET_MASK;
 		keymasked = keymasked >> BUCKET_SIZE_BITS;
 		level++;
@@ -116,30 +120,31 @@ insert_on_leaf:
 	hlist_add_head(&entry->node, &hamt_new_leaf->bucket);
 
 	struct hamt_node *hamt_new_node = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
+	set_node(&hamt_new_node, keymasked & BUCKET_MASK, (void *) SET_LEAF(hamt_new_leaf));
+	set_node(&hamt_new_node, (hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK, (void *) SET_LEAF(hamt_old_leaf));
 	set_node(hamtp, bucket_key, hamt_new_node);
-	set_node(hamt_new_node, keymasked & BUCKET_MASK, (void *) SET_LEAF(hamt_new_leaf));
-	set_node(hamt_new_node, (hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK, (void *) SET_LEAF(hamt_old_leaf));
 
 	return 0;
 }
 
-struct hlist_head *hamt_search(struct hamt_root *hroot, u32 key) {
+struct hlist_head *hamt_search(struct hamt_node **hamt_root, u32 key) {
 	int keymasked = key;
-	struct hamt_node *hnode = &hroot->root;
+	struct hamt_node *hnode = *hamt_root;
 	while (1) {
-		void *n = get_node(hnode, keymasked & BUCKET_MASK);
-		if (IS_LEAF(n)) {
-			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(n);
-			// printk("hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
-			return &hleaf->bucket;
-		}
+		void **n = get_node(hnode, keymasked & BUCKET_MASK);
 		// Not found
-		if (!GET_POINTER(n)) {
+		if ( !n || !GET_POINTER(*n)) {
 			// printk("%X %d NOT FOUND SEARCH\n", key, key);
 			return NULL;
 		}
 
-		hnode = (struct hamt_node *) n;	
+		if (IS_LEAF(*n)) {
+			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(*n);
+			// printk("hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
+			return &hleaf->bucket;
+		}
+
+		hnode = (struct hamt_node *) *n;	
 		keymasked = keymasked >> BUCKET_SIZE_BITS;
 	}
 }
@@ -148,17 +153,23 @@ static int isEmpty(struct hamt_node *hnode) {
 	return !hnode->len;
 }
 
-void hamt_remove(struct hamt_root *hroot, u32 key) {
+void hamt_remove(struct hamt_node **hamt_root, u32 key) {
 	int keymasked = key;
-	struct hamt_node *hnode = &hroot->root;
-	struct hamt_node *path[MAX_LEVEL] = {NULL};
+	struct hamt_node **hnode = hamt_root;
+	struct hamt_node **path[MAX_LEVEL] = {NULL};
 	int level = 0;
 
 	while (1) {
 		path[level++] = hnode;
-		void *n = get_node(hnode, keymasked & BUCKET_MASK);
-		if(IS_LEAF(n)) {
-			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(n);
+		void **n = get_node(*hnode, keymasked & BUCKET_MASK);
+		
+		// Not found
+		if ( !n || !GET_POINTER(*n)) {
+			// printk("%X %d NOT FOUND REMOVE\n", key, key);
+			return ;
+		}
+		if(IS_LEAF(*n)) {
+			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(*n);
 			//printk("removing hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, (void *)hleaf->bucket);
 			remove_node(hnode, keymasked & BUCKET_MASK);
 
@@ -175,19 +186,14 @@ void hamt_remove(struct hamt_root *hroot, u32 key) {
 			kfree(hleaf);
 			goto out;
 		}
-		// Not found
-		if (!GET_POINTER(n)) {
-			// printk("%X %d NOT FOUND REMOVE\n", key, key);
-			return ;
-		}
 
-		hnode = (struct hamt_node *) n;
+		hnode = (struct hamt_node **) n;
 		keymasked = keymasked >> BUCKET_SIZE_BITS;
 	}
 out:
 	for (int i = level-1; i >= 1; i--) {
-		if (isEmpty(path[i])) {
-			kfree(path[i]);
+		if (isEmpty(*path[i])) {
+			kfree(*path[i]);
 			remove_node(path[i-1], (key >> (BUCKET_SIZE_BITS*(i-1))) & BUCKET_MASK);
 		}
 	}
