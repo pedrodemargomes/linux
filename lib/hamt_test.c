@@ -18,13 +18,6 @@ static unsigned int reverse_bits(unsigned int x) {
     return x;
 }
 
-static void print_node(struct hamt_node *node)
-{
-	printk("len: %d\n", node->len);
-	for (int i = 0; i < BUCKET_SIZE; i++)
-		printk("%hhx: %px\n", i, node->hashmap[i]);
-}
-
 static int test_insert_search_del(void)
 {
 	struct hamt_root *hroot = kzalloc(sizeof(struct hamt_root), GFP_KERNEL);
@@ -99,14 +92,10 @@ static void test_remove_path(void)
 	tests[1] = reverse_bits(x+1);
 
 	hamt_insert(hroot, (void *)&tests[0], tests[0]);
-	print_node(&hroot->root);
 	hamt_insert(hroot, (void *)&tests[1], tests[1]);
-	// print_node(&hroot->root);
 
 	hamt_remove(hroot, tests[0]);
-	// print_node(&hroot->root);
 	hamt_remove(hroot, tests[1]);
-	//print_node(&hroot->root);
 
 	kfree(hroot);
 }

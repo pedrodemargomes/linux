@@ -41,7 +41,7 @@ static int remove_node(struct hamt_node *hamtp, u32 key) {
 	}
 
 	u32 k = bitmap_weight(hamtp->index, key);	
-	for (int i = k; i < hamtp->len; i++)
+	for (int i = k; i < hamtp->len-1; i++)
 		hamtp->hashmap[i] = hamtp->hashmap[i+1]; 
 
 	// Realloc shrink hashmap
