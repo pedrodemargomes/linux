@@ -31,6 +31,8 @@ struct hamt_root {
 	struct hamt_root name = { \
 		.h_root = kzalloc(sizeof(struct hamt_node), GFP_KERNEL) \
 	}
+#define FREE_HAMT_ROOT(name) \
+	kfree(name.h_root)
 
 int hamt_insert(struct hamt_root *root, void *value, u32 key);
 struct hlist_head *hamt_search(struct hamt_root *root, u32 key);

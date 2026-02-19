@@ -125,6 +125,7 @@ insert_on_leaf:
 
 	return 0;
 }
+EXPORT_SYMBOL(hamt_insert);
 
 struct hlist_head *hamt_search(struct hamt_root *root, u32 key) {
 	int keymasked = key;
@@ -147,6 +148,7 @@ struct hlist_head *hamt_search(struct hamt_root *root, u32 key) {
 		keymasked = keymasked >> BUCKET_SIZE_BITS;
 	}
 }
+EXPORT_SYMBOL(hamt_search);
 
 static int isEmpty(struct hamt_node *hnode) {
 	return !hnode->len;
@@ -197,3 +199,4 @@ out:
 		}
 	}
 }
+EXPORT_SYMBOL(hamt_remove);

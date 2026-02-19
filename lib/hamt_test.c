@@ -18,6 +18,71 @@ static unsigned int reverse_bits(unsigned int x) {
     return x;
 }
 
+static int test_insert_search_del_speed(void)
+{
+	DEFINE_HAMT(hroot);
+	cycles_t time1, time2, time;
+	int k;
+	prandom_seed_state(&rnd, seed);
+
+	unsigned int perf_loops = 10;
+	unsigned int size = 1000*16;
+	unsigned int *tests = kmalloc_array(size, sizeof(unsigned int), GFP_KERNEL);
+	for (unsigned int i = 0; i < size; i++) {
+		tests[i] = (unsigned int) prandom_u32_state(&rnd);
+	}
+	tests[size-1] = 0;
+	
+	printk("insert+remove...\n");
+	time1 = get_cycles();
+	for (k = 0; k < perf_loops; k++) {
+		for (unsigned int i = 0; tests[i]; i++) {
+			hamt_insert(&hroot, (void *)&tests[i], tests[i]);
+		}
+		for (unsigned int i = 0; tests[i]; i++) {
+			hamt_remove(&hroot, tests[i]);
+		}
+	}
+	time2 = get_cycles();
+	time = time2 - time1;
+	time = div_u64(time, perf_loops);
+	printk("	insert+remove %u elements: %llu cycles\n", size-1, (unsigned long long)time);
+
+	for (unsigned int i = 0; tests[i]; i++) {
+		hamt_insert(&hroot, (void *)&tests[i], tests[i]);
+	}
+
+	printk("searching...\n");
+	time1 = get_cycles();
+	for (k = 0; k < perf_loops; k++) {
+		for (unsigned int i = 0; tests[i]; i++) {
+			struct hamt_entry *entry;
+			struct hlist_head *head = hamt_search(&hroot, tests[i]);
+
+			if (!head)
+				printk("ERRO: hamt_search %u not found\n", tests[i]);
+			else {
+				hlist_for_each_entry(entry, head, node) {
+					// printk("entry->value: %u\n", *((unsigned int *)entry->value));
+				}
+			}
+		}
+	}
+	time2 = get_cycles();
+	time = time2 - time1;
+	time = div_u64(time, perf_loops);
+	printk("	search %u elements: %llu cycles\n", size-1, (unsigned long long)time);
+
+	for (unsigned int i = 0; tests[i]; i++) {
+		hamt_remove(&hroot, tests[i]);
+	}
+
+	kfree(tests);
+	FREE_HAMT_ROOT(hroot);
+	return 0;
+}
+
+
 static int test_insert_search_del(void)
 {
 	DEFINE_HAMT(hroot);
@@ -25,20 +90,18 @@ static int test_insert_search_del(void)
 	prandom_seed_state(&rnd, seed);
 
 	unsigned int size = 10000*16;
-	//int tests[] = {0x0111, 0x1111, 0x2111, 0x3111, 0x3011, 0x0021, NULL};
 	unsigned int *tests = kmalloc_array(size, sizeof(unsigned int), GFP_KERNEL);
 	for (unsigned int i = 0; i < size; i+=256) {
 		unsigned int x = (unsigned int) prandom_u32_state(&rnd) & ~0xFF;
 		
 		tests[i] = reverse_bits(x);
-		/*
 		for (unsigned int j = 1; j < 256; j++)
 			tests[i+j] = reverse_bits(x+j);
 		// printk("%X (%u) ", tests[i], tests[i]);
-		*/
 	}
 	tests[size-1] = 0;
 
+	
 	printk("inserting...\n");
 	for (unsigned int i = 0; tests[i]; i++) {
 		hamt_insert(&hroot, (void *)&tests[i], tests[i]);
@@ -60,7 +123,6 @@ static int test_insert_search_del(void)
 
 	printk("removing...\n");
 	for (unsigned int i = 0; tests[i]; i++) {
-		//printk("remove %d: %u\n", i, tests[i]);
 		hamt_remove(&hroot, tests[i]);
 	}
 
@@ -78,6 +140,7 @@ static int test_insert_search_del(void)
 	}
 
 	kfree(tests);
+	FREE_HAMT_ROOT(hroot);
 	return 0; /* Fail will directly unload the module */
 }
 
@@ -109,6 +172,8 @@ static void test_remove_path(void)
 
 	hamt_remove(&hroot, tests[0]);
 	hamt_remove(&hroot, tests[1]);
+	
+	FREE_HAMT_ROOT(hroot);
 }
 
 static int __init hamt_test_init(void)
@@ -120,6 +185,9 @@ static int __init hamt_test_init(void)
 
 	printk("test_remove_path\n");
 	test_remove_path();
+	
+	printk("test_insert_search_del_speed\n");
+	test_insert_search_del_speed();
 	
 	return 0; /* Fail will directly unload the module */
 }

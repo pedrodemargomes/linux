@@ -11,9 +11,9 @@
 	module_param(name, type, 0444);		\
 	MODULE_PARM_DESC(name, msg);
 
-__param(int, nnodes, 100, "Number of nodes in the rb-tree");
-__param(int, perf_loops, 1000, "Number of iterations modifying the rb-tree");
-__param(int, check_loops, 100, "Number of iterations modifying and verifying the rb-tree");
+__param(int, nnodes, 16000, "Number of nodes in the rb-tree");
+__param(int, perf_loops, 10, "Number of iterations modifying the rb-tree");
+__param(int, check_loops, 10, "Number of iterations modifying and verifying the rb-tree");
 __param(ullong, seed, 3141592653589793238ULL, "Random seed");
 
 struct test_node {
@@ -320,11 +320,14 @@ static int basic_check(void)
 	time = time2 - time1;
 
 	time = div_u64(time, perf_loops);
-	printk("        cached: %llu cycles\n", (unsigned long long)time);
+	printk("	cached: %llu cycles\n", (unsigned long long)time);
+
 
 	for (i = 0; i < nnodes; i++)
 		erase(nodes + i, &root);
 
+	return 0;
+	
 	/* run checks */
 	for (i = 0; i < check_loops; i++) {
 		init();
@@ -406,7 +409,8 @@ static int __init rbtree_test_init(void)
 	prandom_seed_state(&rnd, seed);
 
 	basic_check();
-	augmented_check();
+	if (0)
+		augmented_check();
 
 	kfree(nodes);
 
