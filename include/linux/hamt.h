@@ -23,8 +23,17 @@ struct hamt_node {
 	void *hashmap[];
 };
 
-int hamt_insert(struct hamt_node **hamt_root, void *value, u32 key);
-struct hlist_head *hamt_search(struct hamt_node **hamt_root, u32 key);
-void hamt_remove(struct hamt_node **hamt_root, u32 key);
+struct hamt_root {
+	struct hamt_node *h_root;
+};
+
+#define DEFINE_HAMT(name) \
+	struct hamt_root name = { \
+		.h_root = kzalloc(sizeof(struct hamt_node), GFP_KERNEL) \
+	}
+
+int hamt_insert(struct hamt_root *root, void *value, u32 key);
+struct hlist_head *hamt_search(struct hamt_root *root, u32 key);
+void hamt_remove(struct hamt_root *root, u32 key);
 
 #endif	/* _LINUX_HAMT_H */

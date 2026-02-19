@@ -59,10 +59,10 @@ static int remove_node(struct hamt_node **hamtpp, u32 key) {
 }
 
 // value pointer cannot be NULL
-int hamt_insert(struct hamt_node **hamt_root, void *value, u32 key) {
+int hamt_insert(struct hamt_root *root, void *value, u32 key) {
 	int bucket_key;
 	void **n;
-	struct hamt_node **hamtp = hamt_root;
+	struct hamt_node **hamtp = &root->h_root;
 	int level = 0;
 	int keymasked = key;
 
@@ -98,7 +98,6 @@ insert_on_leaf:
 
 	if (hamt_old_leaf->key == key) {
 		hlist_add_head(&entry->node, &hamt_old_leaf->bucket);
-		// printk("HASH COLISION\n");
 		return 0;
 	}
 
@@ -127,9 +126,9 @@ insert_on_leaf:
 	return 0;
 }
 
-struct hlist_head *hamt_search(struct hamt_node **hamt_root, u32 key) {
+struct hlist_head *hamt_search(struct hamt_root *root, u32 key) {
 	int keymasked = key;
-	struct hamt_node *hnode = *hamt_root;
+	struct hamt_node *hnode = root->h_root;
 	while (1) {
 		void **n = get_node(hnode, keymasked & BUCKET_MASK);
 		// Not found
@@ -153,9 +152,9 @@ static int isEmpty(struct hamt_node *hnode) {
 	return !hnode->len;
 }
 
-void hamt_remove(struct hamt_node **hamt_root, u32 key) {
+void hamt_remove(struct hamt_root *root, u32 key) {
 	int keymasked = key;
-	struct hamt_node **hnode = hamt_root;
+	struct hamt_node **hnode = &root->h_root;
 	struct hamt_node **path[MAX_LEVEL] = {NULL};
 	int level = 0;
 

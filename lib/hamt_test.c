@@ -20,7 +20,7 @@ static unsigned int reverse_bits(unsigned int x) {
 
 static int test_insert_search_del(void)
 {
-	struct hamt_node *hroot = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
+	DEFINE_HAMT(hroot);
 
 	prandom_seed_state(&rnd, seed);
 
@@ -78,14 +78,13 @@ static int test_insert_search_del(void)
 	}
 
 	kfree(tests);
-	kfree(hroot);
 	return 0; /* Fail will directly unload the module */
 }
 
 static void test_remove_path(void)
 {
 	unsigned int x;
-	struct hamt_node *hroot = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
+	DEFINE_HAMT(hroot);
 	prandom_seed_state(&rnd, seed);
 
 	unsigned int tests[2];
@@ -110,8 +109,6 @@ static void test_remove_path(void)
 
 	hamt_remove(&hroot, tests[0]);
 	hamt_remove(&hroot, tests[1]);
-
-	kfree(hroot);
 }
 
 static int __init hamt_test_init(void)
