@@ -14,7 +14,7 @@ struct hamt_entry {
 
 struct hamt_leaf {
 	struct hlist_head bucket;
-	u32 key;
+	u64 key;
 };
 
 struct hamt_node {
@@ -34,8 +34,8 @@ struct hamt_root {
 #define FREE_HAMT_ROOT(name) \
 	kfree(name.h_root)
 
-int hamt_insert(struct hamt_root *root, void *value, u32 key);
-struct hlist_head *hamt_search(struct hamt_root *root, u32 key);
-void hamt_remove(struct hamt_root *root, u32 key);
+int hamt_insert(struct hamt_root *root, void *value, u64 key);
+struct hlist_head *hamt_search(struct hamt_root *root, u64 key);
+void hamt_remove(struct hamt_root *root, u64 key);
 
 #endif	/* _LINUX_HAMT_H */

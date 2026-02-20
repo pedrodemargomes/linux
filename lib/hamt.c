@@ -3,20 +3,20 @@
 
 #define BUCKET_MASK 0xFF
 #define BUCKET_SIZE_BITS 8
-#define MAX_LEVEL (32/BUCKET_SIZE_BITS)
+#define MAX_LEVEL (64/BUCKET_SIZE_BITS)
 
 #define TAG_MASK 0x1
 #define IS_LEAF(x) (((unsigned long)x) & 0x1)
 #define SET_LEAF(x) (((unsigned long)x) | 0x1)
 #define GET_POINTER(x) (((unsigned long)x) & ~TAG_MASK)
 
-static void **get_node(struct hamt_node *hamtp, u32 key) {
+static void **get_node(struct hamt_node *hamtp, u64 key) {
 	if (!test_bit(key, hamtp->index))
 		return NULL;
 	return (void **) &hamtp->hashmap[bitmap_weight(hamtp->index, key)];
 }
 
-static void set_node(struct hamt_node **hamtpp, u32 key, void *node) {
+static void set_node(struct hamt_node **hamtpp, u64 key, void *node) {
 	struct hamt_node *hamtp = *hamtpp;
 	if (test_bit(key, hamtp->index)) {
 		hamtp->hashmap[bitmap_weight(hamtp->index, key)] = node;
@@ -24,7 +24,7 @@ static void set_node(struct hamt_node **hamtpp, u32 key, void *node) {
 	} else {
 		*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len+1)*sizeof(void *), GFP_KERNEL);
 		hamtp = *hamtpp;
-		u32 k = bitmap_weight(hamtp->index, key);	
+		u64 k = bitmap_weight(hamtp->index, key);	
 		for (int i = hamtp->len; i > k; i--)
 			hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
 
@@ -36,14 +36,14 @@ static void set_node(struct hamt_node **hamtpp, u32 key, void *node) {
 	}
 }
 
-static int remove_node(struct hamt_node **hamtpp, u32 key) {
+static int remove_node(struct hamt_node **hamtpp, u64 key) {
 	struct hamt_node *hamtp = *hamtpp;
 	if (!test_bit(key, hamtp->index)) {
 		//printk("remove_node: key not present in node\n");
 		return 1;
 	}
 
-	u32 k = bitmap_weight(hamtp->index, key);	
+	u64 k = bitmap_weight(hamtp->index, key);
 	for (int i = k; i < hamtp->len-1; i++)
 		hamtp->hashmap[i] = hamtp->hashmap[i+1]; 
 
@@ -59,7 +59,7 @@ static int remove_node(struct hamt_node **hamtpp, u32 key) {
 }
 
 // value pointer cannot be NULL
-int hamt_insert(struct hamt_root *root, void *value, u32 key) {
+int hamt_insert(struct hamt_root *root, void *value, u64 key) {
 	int bucket_key;
 	void **n;
 	struct hamt_node **hamtp = &root->h_root;
@@ -127,7 +127,7 @@ insert_on_leaf:
 }
 EXPORT_SYMBOL(hamt_insert);
 
-struct hlist_head *hamt_search(struct hamt_root *root, u32 key) {
+struct hlist_head *hamt_search(struct hamt_root *root, u64 key) {
 	int keymasked = key;
 	struct hamt_node *hnode = root->h_root;
 	while (1) {
@@ -154,7 +154,7 @@ static int isEmpty(struct hamt_node *hnode) {
 	return !hnode->len;
 }
 
-void hamt_remove(struct hamt_root *root, u32 key) {
+void hamt_remove(struct hamt_root *root, u64 key) {
 	int keymasked = key;
 	struct hamt_node **hnode = &root->h_root;
 	struct hamt_node **path[MAX_LEVEL] = {NULL};
