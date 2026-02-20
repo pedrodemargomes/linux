@@ -18,9 +18,9 @@ static int test_insert_search_del_speed(void)
 
 	unsigned int perf_loops = 10;
 	unsigned int size = 1000*16;
-	unsigned int *tests = kmalloc_array(size, sizeof(unsigned int), GFP_KERNEL);
+	unsigned long *tests = kmalloc_array(size, sizeof(unsigned long), GFP_KERNEL);
 	for (unsigned int i = 0; i < size; i++) {
-		tests[i] = (unsigned int) prandom_u32_state(&rnd);
+		tests[i] = (unsigned long) prandom_u32_state(&rnd);
 	}
 	tests[size-1] = 0;
 	
@@ -29,7 +29,7 @@ static int test_insert_search_del_speed(void)
 	for (k = 0; k < perf_loops; k++) {
 		for (unsigned int i = 0; tests[i]; i++) {
 			// hamt_insert(&hroot, (void *)&tests[i], tests[i]);
-			xa_store(&hroot, tests[i], xa_mk_value(tests[i]), GFP_KERNEL);
+			xa_store(&hroot, tests[i], (void *) tests[i], GFP_KERNEL);
 		}
 		for (unsigned int i = 0; tests[i]; i++) {
 			// hamt_remove(&hroot, tests[i]);
@@ -42,7 +42,7 @@ static int test_insert_search_del_speed(void)
 	printk("	insert+remove %u elements: %llu cycles\n", size-1, (unsigned long long)time);
 
 	for (unsigned int i = 0; tests[i]; i++) {
-		xa_store(&hroot, tests[i], xa_mk_value(tests[i]), GFP_KERNEL);
+		xa_store(&hroot, tests[i], (void *) tests[i], GFP_KERNEL);
 	}
 
 	printk("searching...\n");
@@ -51,7 +51,7 @@ static int test_insert_search_del_speed(void)
 		for (unsigned int i = 0; tests[i]; i++) {
 			void *entry = xa_load(&hroot, tests[i]);
 			if (!entry)
-				printk("ERRO: hamt_search %u not found\n", tests[i]);
+				printk("ERRO: hamt_search %lu not found\n", tests[i]);
 		}
 	}
 	time2 = get_cycles();
@@ -75,7 +75,7 @@ static int __init hamt_test_init(void)
 	printk("test_insert_search_del_speed\n");
 	test_insert_search_del_speed();
 	
-	return 0; /* Fail will directly unload the module */
+	return -1; /* Fail will directly unload the module */
 }
 
 static void __exit hamt_test_exit(void)
