@@ -1,5 +1,6 @@
 #include <linux/hamt.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 
 #define BUCKET_MASK 0xFF
 #define BUCKET_SIZE_BITS 8
@@ -25,8 +26,9 @@ static void set_node(struct hamt_node **hamtpp, u64 key, void *node) {
 		*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len+1)*sizeof(void *), GFP_KERNEL);
 		hamtp = *hamtpp;
 		u64 k = bitmap_weight(hamtp->index, key);	
-		for (int i = hamtp->len; i > k; i--)
-			hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
+		//for (int i = hamtp->len; i > k; i--)
+		//	hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
+		memmove(&hamtp->hashmap[k+1], &hamtp->hashmap[k], (hamtp->len-k) * sizeof(void *));
 
 		set_bit(key, hamtp->index);
 		hamtp->len++;
@@ -44,8 +46,9 @@ static int remove_node(struct hamt_node **hamtpp, u64 key) {
 	}
 
 	u64 k = bitmap_weight(hamtp->index, key);
-	for (int i = k; i < hamtp->len-1; i++)
-		hamtp->hashmap[i] = hamtp->hashmap[i+1]; 
+	//for (int i = k; i < hamtp->len-1; i++)
+	//	hamtp->hashmap[i] = hamtp->hashmap[i+1]; 
+	memmove(&hamtp->hashmap[k], &hamtp->hashmap[k+1], (hamtp->len-k-1) * sizeof(void *));
 
 	// Realloc shrink hashmap
 	*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len-1)*sizeof(void *), GFP_KERNEL);
@@ -57,6 +60,45 @@ static int remove_node(struct hamt_node **hamtpp, u64 key) {
 	// printk("remove_node hamtp: %p len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
 	return 0;
 }
+
+struct hamt_node *stack[1000];
+int hamt_get_num_nodes(struct hamt_root *root) {
+	int len = 0;
+	int top = 0;
+	struct hamt_node **hamtp = &root->h_root;
+	stack[top++] = *hamtp;
+	while(top > 0) {
+		struct hamt_node *n = stack[--top];
+		len++;
+		if (!IS_LEAF(n)) {
+			for (int i = 0; i < n->len; i++) {
+				stack[top++] = n->hashmap[i];
+			}
+		}
+	}
+	return len;
+}
+EXPORT_SYMBOL(hamt_get_num_nodes);
+
+unsigned long hamt_get_size(struct hamt_root *root) {
+	unsigned long size = 0;
+	int top = 0;
+	struct hamt_node **hamtp = &root->h_root;
+	stack[top++] = *hamtp;
+	while(top > 0) {
+		struct hamt_node *n = stack[--top];
+		size += sizeof(*n);
+		if (!IS_LEAF(n)) {
+			for (int i = 0; i < n->len; i++) {
+				stack[top++] = n->hashmap[i];
+			}
+		}
+	}
+	return size;
+}
+EXPORT_SYMBOL(hamt_get_size);
+
+
 
 // value pointer cannot be NULL
 int hamt_insert(struct hamt_root *root, void *value, u64 key) {

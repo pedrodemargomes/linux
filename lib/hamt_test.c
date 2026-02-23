@@ -26,18 +26,24 @@ static int test_insert_search_del_speed(void)
 	prandom_seed_state(&rnd, seed);
 
 	unsigned int perf_loops = 10;
-	unsigned int size = 1000*16;
+	unsigned int size = 1000*20;
 	unsigned long *tests = kmalloc_array(size, sizeof(unsigned long), GFP_KERNEL);
 	for (unsigned int i = 0; i < size; i++) {
 		tests[i] = (unsigned long) prandom_u32_state(&rnd);
 	}
 	tests[size-1] = 0;
 	
+	printk("num nodes: %d\n", hamt_get_num_nodes(&hroot));
+	printk("size: %lu\n", hamt_get_size(&hroot));
+	
 	printk("insert+remove...\n");
 	time1 = get_cycles();
 	for (k = 0; k < perf_loops; k++) {
 		for (unsigned int i = 0; tests[i]; i++) {
 			hamt_insert(&hroot, (void *)&tests[i], tests[i]);
+			// printk("inserted key %lx\n", tests[i]);
+			// printk("num nodes: %d\n", hamt_get_num_nodes(&hroot));
+			// printk("size: %lu\n", hamt_get_size(&hroot));
 		}
 		for (unsigned int i = 0; tests[i]; i++) {
 			hamt_remove(&hroot, tests[i]);
@@ -51,6 +57,9 @@ static int test_insert_search_del_speed(void)
 	for (unsigned int i = 0; tests[i]; i++) {
 		hamt_insert(&hroot, (void *)&tests[i], tests[i]);
 	}
+
+	printk("num nodes: %d\n", hamt_get_num_nodes(&hroot));
+	printk("size: %lu\n", hamt_get_size(&hroot));
 
 	printk("searching...\n");
 	time1 = get_cycles();

@@ -37,5 +37,7 @@ struct hamt_root {
 int hamt_insert(struct hamt_root *root, void *value, u64 key);
 struct hlist_head *hamt_search(struct hamt_root *root, u64 key);
 void hamt_remove(struct hamt_root *root, u64 key);
+int hamt_get_num_nodes(struct hamt_root *root);
+unsigned long hamt_get_size(struct hamt_root *root);
 
 #endif	/* _LINUX_HAMT_H */
