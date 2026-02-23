@@ -11,20 +11,23 @@
 #define SET_LEAF(x) (((unsigned long)x) | 0x1)
 #define GET_POINTER(x) (((unsigned long)x) & ~TAG_MASK)
 
-static void **get_node(struct hamt_node *hamtp, u64 key) {
+static inline void **get_node(struct hamt_node *hamtp, u64 key) {
 	if (!test_bit(key, hamtp->index))
 		return NULL;
 	return (void **) &hamtp->hashmap[bitmap_weight(hamtp->index, key)];
 }
 
-static void set_node(struct hamt_node **hamtpp, u64 key, void *node) {
+static inline void set_node(struct hamt_node **hamtpp, u64 key, void *node) {
 	struct hamt_node *hamtp = *hamtpp;
 	if (test_bit(key, hamtp->index)) {
 		hamtp->hashmap[bitmap_weight(hamtp->index, key)] = node;
 		//printk("set_node hamtp: %px len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
 	} else {
-		*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len+1)*sizeof(void *), GFP_KERNEL);
-		hamtp = *hamtpp;
+		if (hamtp->len >= hamtp->len_hashmap) {
+			*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len_hashmap + 32)*sizeof(void *), GFP_KERNEL);
+			hamtp = *hamtpp;
+			hamtp->len_hashmap = hamtp->len_hashmap+32;
+		}
 		u64 k = bitmap_weight(hamtp->index, key);	
 		//for (int i = hamtp->len; i > k; i--)
 		//	hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
@@ -38,7 +41,7 @@ static void set_node(struct hamt_node **hamtpp, u64 key, void *node) {
 	}
 }
 
-static int remove_node(struct hamt_node **hamtpp, u64 key) {
+static inline int remove_node(struct hamt_node **hamtpp, u64 key) {
 	struct hamt_node *hamtp = *hamtpp;
 	if (!test_bit(key, hamtp->index)) {
 		//printk("remove_node: key not present in node\n");
@@ -51,8 +54,12 @@ static int remove_node(struct hamt_node **hamtpp, u64 key) {
 	memmove(&hamtp->hashmap[k], &hamtp->hashmap[k+1], (hamtp->len-k-1) * sizeof(void *));
 
 	// Realloc shrink hashmap
-	*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len-1)*sizeof(void *), GFP_KERNEL);
-	hamtp = *hamtpp;
+	if (hamtp->len+32 <= hamtp->len_hashmap) {
+		*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len_hashmap-32)*sizeof(void *), GFP_KERNEL);
+		hamtp = *hamtpp;
+		hamtp->len_hashmap = hamtp->len_hashmap-32;
+	}
+
 
 	clear_bit(key, hamtp->index);
 	hamtp->len--;
@@ -192,7 +199,7 @@ struct hlist_head *hamt_search(struct hamt_root *root, u64 key) {
 }
 EXPORT_SYMBOL(hamt_search);
 
-static int isEmpty(struct hamt_node *hnode) {
+static inline int isEmpty(struct hamt_node *hnode) {
 	return !hnode->len;
 }
 

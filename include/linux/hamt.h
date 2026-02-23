@@ -20,6 +20,7 @@ struct hamt_leaf {
 struct hamt_node {
 	u16 len;
 	DECLARE_BITMAP(index, BUCKET_SIZE);
+	u16 len_hashmap;
 	void *hashmap[];
 };
 
