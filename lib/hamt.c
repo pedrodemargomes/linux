@@ -68,7 +68,7 @@ static inline int remove_node(struct hamt_node **hamtpp, u64 key) {
 	return 0;
 }
 
-struct hamt_node *stack[1000];
+static struct hamt_node *stack[1000];
 int hamt_get_num_nodes(struct hamt_root *root) {
 	int len = 0;
 	int top = 0;

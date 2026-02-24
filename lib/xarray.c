@@ -1601,6 +1601,57 @@ void *xas_find_conflict(struct xa_state *xas)
 }
 EXPORT_SYMBOL_GPL(xas_find_conflict);
 
+
+static struct xa_node *stack[1000];
+int xarray_get_num_nodes(struct xarray *xa) {
+	xa_lock(xa);
+	int len = 0;
+	int top = 0;
+	struct xa_node *node = xa_head(xa);
+	if (!node)
+		goto out;
+	if (!xa_is_node(node))
+                goto out;
+	stack[top++] = xa_to_node(node);
+	while(top > 0) {
+		node = stack[--top];
+		len++;
+		for (int i = 0; i < XA_CHUNK_SIZE; i++) {
+			void *curr = xa_entry_locked(xa, node, i);
+			if (!xa_is_internal(curr))
+				continue;
+
+			if (xa_is_node(curr))
+				stack[top++] = xa_to_node(curr);
+		}
+	}
+out:
+	xa_unlock(xa);
+	return len;
+}
+EXPORT_SYMBOL(xarray_get_num_nodes);
+/*
+unsigned long hamt_get_size(struct hamt_root *root) {
+	unsigned long size = 0;
+	int top = 0;
+	struct hamt_node **hamtp = &root->h_root;
+	stack[top++] = *hamtp;
+	while(top > 0) {
+		struct hamt_node *n = stack[--top];
+		size += sizeof(*n);
+		if (!IS_LEAF(n)) {
+			for (int i = 0; i < n->len; i++) {
+				stack[top++] = n->hashmap[i];
+			}
+		}
+	}
+	return size;
+}
+EXPORT_SYMBOL(hamt_get_size);
+*/
+
+
+
 /**
  * xa_load() - Load an entry from an XArray.
  * @xa: XArray.
@@ -2478,4 +2529,5 @@ void xa_dump(const struct xarray *xa)
 		shift = xa_to_node(entry)->shift + XA_CHUNK_SHIFT;
 	xa_dump_entry(entry, 0, shift);
 }
+
 #endif
