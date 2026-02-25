@@ -2451,7 +2451,7 @@ void xa_destroy(struct xarray *xa)
 }
 EXPORT_SYMBOL(xa_destroy);
 
-#ifdef XA_DEBUG
+// #ifdef XA_DEBUG
 void xa_dump_node(const struct xa_node *node)
 {
 	unsigned i, j;
@@ -2474,7 +2474,7 @@ void xa_dump_node(const struct xa_node *node)
 	pr_cont("\n");
 }
 
-void xa_dump_index(unsigned long index, unsigned int shift)
+static void xa_dump_index(unsigned long index, unsigned int shift)
 {
 	if (!shift)
 		pr_info("%lu: ", index);
@@ -2484,7 +2484,7 @@ void xa_dump_index(unsigned long index, unsigned int shift)
 		pr_info("%lu-%lu: ", index, index | ((1UL << shift) - 1));
 }
 
-void xa_dump_entry(const void *entry, unsigned long index, unsigned long shift)
+static void xa_dump_entry(const void *entry, unsigned long index, unsigned long shift)
 {
 	if (!entry)
 		return;
@@ -2530,4 +2530,4 @@ void xa_dump(const struct xarray *xa)
 	xa_dump_entry(entry, 0, shift);
 }
 
-#endif
+//#endif
