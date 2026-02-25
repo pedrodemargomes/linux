@@ -8,6 +8,8 @@ Fill page cache
 
 ./pagecachefill
 
+If you fill the cache accessing the file in a random way the xarray will have more nodes than if you access the file sequentialy
+
 See how much of the file is in the page cache
 
 ./getpagecache testfile.bin
