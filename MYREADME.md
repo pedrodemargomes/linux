@@ -1,6 +1,10 @@
 # PAGE CACHE TESTS
 
-Fill cache
+Clean page cache
+
+echo 3 > /proc/sys/vm/drop_caches
+
+Fill page cache
 
 ./pagecachefill
 
