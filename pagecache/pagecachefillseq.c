@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define FILESIZE   (64ULL * 1024 * 1024 * 1024)  // 64 GB
+#define FILESIZE   (8ULL * 1024 * 1024 * 1024)  // 8 GB
 #define ACCESSES   (20000000ULL)                // 20M lookups
 
 static inline uint64_t fast_rand(uint64_t *seed)
@@ -46,22 +46,20 @@ int main(int argc, char **argv)
     }
 
     printf("File size: %lu pages\n", npages);
-    printf("Performing %lu random page lookups...\n", ACCESSES);
+    printf("Performing %lu sequential page lookups...\n", ACCESSES);
 
-  
-   /* 
+ 
     for (uint64_t i = 0; i < FILESIZE; i+=4096) {
         sum += map[i];
     }
-    */
-    
+   /* 
     for (uint64_t i = 0; i < ACCESSES; i++) {
         uint64_t page = fast_rand(&seed) % npages;
         uint64_t offset = page * pagesize;
 
         sum += map[offset];   // force page lookup
     }
-    
+    */
     printf("Done. checksum=%lu\n", sum);
 
     munmap(map, FILESIZE);

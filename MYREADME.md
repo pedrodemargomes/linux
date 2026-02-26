@@ -8,7 +8,7 @@ Fill page cache
 
 ./pagecachefill
 
-If you fill the cache accessing the file in a random way the xarray will have more nodes than if you access the file sequentialy
+If you fill the cache accessing the file in a random way or backwords the xarray will have more nodes than if you access the file sequentialy
 
 See how much of the file is in the page cache
 
@@ -17,3 +17,9 @@ See how much of the file is in the page cache
 Prink the number of node in page cache xarray
 
 stat testfile.bin
+
+# BLOG POSTS IDEAS
+
+- HAMT, and HAMT vs XARRAY comparison
+
+- xarray page cache size. make a procfile to get the size of the xarray
