@@ -104,6 +104,7 @@ TEST_GEN_FILES += hugetlb_dio
 TEST_GEN_FILES += droppable
 TEST_GEN_FILES += guard-regions
 TEST_GEN_FILES += merge
+TEST_GEN_FILES += merge-test
 TEST_GEN_FILES += rmap
 
 ifneq ($(ARCH),arm64)
