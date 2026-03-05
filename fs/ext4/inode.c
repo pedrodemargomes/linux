@@ -433,8 +433,15 @@ void ext4_check_map_extents_env(struct inode *inode)
 	    ext4_verity_in_progress(inode))
 		return;
 
-	WARN_ON_ONCE(!inode_is_locked(inode) &&
-		     !rwsem_is_locked(&inode->i_mapping->invalidate_lock));
+	if (inode->i_ino == 1969190)
+		printk("inode_is_locked: %d rwsem_is_locked: %d\n", inode_is_locked(inode), rwsem_is_locked(&inode->i_mapping->invalidate_lock));
+
+	// WARN_ON_ONCE(!inode_is_locked(inode) &&
+	// 	     !rwsem_is_locked(&inode->i_mapping->invalidate_lock));
+
+	if(!inode_is_locked(inode) &&
+		     !rwsem_is_locked(&inode->i_mapping->invalidate_lock)) 
+		panic("asdf");
 }
 #else
 void ext4_check_map_extents_env(struct inode *inode) {}

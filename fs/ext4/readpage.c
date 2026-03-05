@@ -211,6 +211,9 @@ static inline loff_t ext4_readpage_limit(struct inode *inode)
 static int ext4_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 		struct readahead_control *rac, struct folio *folio)
 {
+	if (inode->i_ino == 1969190)
+		printk("inode_is_locked: %d rwsem_is_locked: %d\n", inode_is_locked(inode), rwsem_is_locked(&inode->i_mapping->invalidate_lock));
+
 	struct bio *bio = NULL;
 	sector_t last_block_in_bio = 0;
 	const unsigned blkbits = inode->i_blkbits;
@@ -399,6 +402,9 @@ int ext4_read_folio(struct file *file, struct folio *folio)
 	int ret;
 
 	trace_ext4_read_folio(inode, folio);
+
+	if (inode->i_ino == 1969190)
+		printk("inode_is_locked: %d rwsem_is_locked: %d\n", inode_is_locked(inode), rwsem_is_locked(&inode->i_mapping->invalidate_lock));
 
 	if (ext4_has_inline_data(inode)) {
 		ret = ext4_readpage_inline(inode, folio);

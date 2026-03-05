@@ -133,21 +133,27 @@ TEST_F(merge, handle_uprobe_upon_merged_vma)
 	attr.config1 = (__u64)(long)probe_file;
 	attr.config2 = 0x0;
 
+	printf("perf\n");
 	ASSERT_GE(syscall(__NR_perf_event_open, &attr, 0, -1, -1, 0), 0);
 
+	printf("mmap ptr1\n");
 	ptr1 = mmap(&carveout[page_size], 10 * page_size, PROT_EXEC,
 		    MAP_PRIVATE | MAP_FIXED, fd, 0);
 	ASSERT_NE(ptr1, MAP_FAILED);
 
+	printf("mmap ptr2\n");
 	ptr2 = mremap(ptr1, page_size, 2 * page_size,
 		      MREMAP_MAYMOVE | MREMAP_FIXED, ptr1 + 5 * page_size);
 	ASSERT_NE(ptr2, MAP_FAILED);
 
+	printf("mremap\n");
 	ASSERT_NE(mremap(ptr2, page_size, page_size,
 			 MREMAP_MAYMOVE | MREMAP_FIXED, ptr1), MAP_FAILED);
 
 out:
+	printf("close\n");
 	close(fd);
+	printf("remove\n");
 	remove(probe_file);
 }
 

@@ -1054,10 +1054,12 @@ static int __copy_insn(struct address_space *mapping, struct file *filp,
 	 * and in page-cache. If ->read_folio == NULL it must be shmem_mapping(),
 	 * see uprobe_register().
 	 */
+	filemap_invalidate_lock(mapping);
 	if (mapping->a_ops->read_folio)
 		page = read_mapping_page(mapping, offset >> PAGE_SHIFT, filp);
 	else
 		page = shmem_read_mapping_page(mapping, offset >> PAGE_SHIFT);
+	filemap_invalidate_unlock(mapping);	
 	if (IS_ERR(page))
 		return PTR_ERR(page);
 
