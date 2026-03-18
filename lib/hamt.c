@@ -87,6 +87,26 @@ int hamt_get_num_nodes(struct hamt_root *root) {
 }
 EXPORT_SYMBOL(hamt_get_num_nodes);
 
+int hamt_get_num_nonleaf_nodes(struct hamt_root *root) {
+	int len = 0;
+	int top = 0;
+	struct hamt_node **hamtp = &root->h_root;
+	stack[top++] = *hamtp;
+	while(top > 0) {
+		struct hamt_node *n = stack[--top];
+		if (!IS_LEAF(n)) {
+			len++;
+			for (int i = 0; i < n->len; i++) {
+				stack[top++] = n->hashmap[i];
+			}
+		}
+	}
+	return len;
+}
+EXPORT_SYMBOL(hamt_get_num_nonleaf_nodes);
+
+
+
 unsigned long hamt_get_size(struct hamt_root *root) {
 	unsigned long size = 0;
 	int top = 0;
@@ -115,9 +135,6 @@ int hamt_insert(struct hamt_root *root, void *value, u64 key) {
 	int level = 0;
 	int keymasked = key;
 
-	struct hamt_entry *entry = kzalloc(sizeof(struct hamt_entry), GFP_KERNEL);
-	entry->value = value;
-
 	for (;;) {
 		bucket_key = keymasked & BUCKET_MASK;
 		n = get_node(*hamtp, bucket_key); 
@@ -136,8 +153,7 @@ int hamt_insert(struct hamt_root *root, void *value, u64 key) {
 insert_on_empty:
 	struct hamt_leaf *hamt_leaf = kzalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
 	hamt_leaf->key = key;
-	INIT_HLIST_HEAD(&hamt_leaf->bucket);
-	hlist_add_head(&entry->node, &hamt_leaf->bucket);
+	hamt_leaf->value = value;
 	set_node(hamtp, bucket_key, (void *) SET_LEAF(hamt_leaf));
 	return 0;
 
@@ -146,8 +162,8 @@ insert_on_leaf:
 	struct hamt_leaf *hamt_old_leaf = (struct hamt_leaf *) GET_POINTER(*n);
 
 	if (hamt_old_leaf->key == key) {
-		hlist_add_head(&entry->node, &hamt_old_leaf->bucket);
-		return 0;
+		// key already inserted
+		return 1;
 	}
 
 	keymasked = keymasked >> BUCKET_SIZE_BITS;
@@ -164,9 +180,8 @@ insert_on_leaf:
 	// New leaf to insert
 	struct hamt_leaf *hamt_new_leaf = kzalloc(sizeof(struct hamt_leaf), GFP_KERNEL);
 	hamt_new_leaf->key = key;
-	INIT_HLIST_HEAD(&hamt_new_leaf->bucket);
-	hlist_add_head(&entry->node, &hamt_new_leaf->bucket);
-
+	hamt_new_leaf->value = value;
+	
 	struct hamt_node *hamt_new_node = kzalloc(sizeof(struct hamt_node), GFP_KERNEL);
 	set_node(&hamt_new_node, keymasked & BUCKET_MASK, (void *) SET_LEAF(hamt_new_leaf));
 	set_node(&hamt_new_node, (hamt_old_leaf->key >> (BUCKET_SIZE_BITS*(level+1))) & BUCKET_MASK, (void *) SET_LEAF(hamt_old_leaf));
@@ -176,7 +191,7 @@ insert_on_leaf:
 }
 EXPORT_SYMBOL(hamt_insert);
 
-struct hlist_head *hamt_search(struct hamt_root *root, u64 key) {
+void *hamt_search(struct hamt_root *root, u64 key) {
 	int keymasked = key;
 	struct hamt_node *hnode = root->h_root;
 	while (1) {
@@ -190,7 +205,7 @@ struct hlist_head *hamt_search(struct hamt_root *root, u64 key) {
 		if (IS_LEAF(*n)) {
 			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(*n);
 			// printk("hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, hleaf->bucket);
-			return &hleaf->bucket;
+			return hleaf->value;
 		}
 
 		hnode = (struct hamt_node *) *n;	
@@ -222,16 +237,6 @@ void hamt_remove(struct hamt_root *root, u64 key) {
 			struct hamt_leaf *hleaf = (struct hamt_leaf *) GET_POINTER(*n);
 			//printk("removing hleaf->key = %X (%d) hleaf->bucket = %p\n", hleaf->key, hleaf->key, (void *)hleaf->bucket);
 			remove_node(hnode, keymasked & BUCKET_MASK);
-
-			// +++ DEBUG +++
-			struct hamt_entry *entry;
-			struct hlist_node *hn;
-			hlist_for_each_entry_safe(entry, hn, &hleaf->bucket, node) {
-				//printk("entry->value: %u\n", *((unsigned int *)entry->value));
-				hlist_del(&entry->node);
-				kfree(entry);
-			}
-			// ++++++++++++
 
 			kfree(hleaf);
 			goto out;

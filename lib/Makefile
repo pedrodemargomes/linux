@@ -90,7 +90,7 @@ GCOV_PROFILE_test_bitmap.o := n
 endif
 
 obj-$(CONFIG_TEST_UUID) += test_uuid.o
-obj-$(CONFIG_TEST_XARRAY) += xarray_test.o
+obj-$(CONFIG_TEST_XARRAY) += xarray_test1.o
 obj-$(CONFIG_TEST_MAPLE_TREE) += test_maple_tree.o
 obj-$(CONFIG_TEST_PARMAN) += test_parman.o
 obj-$(CONFIG_TEST_KMOD) += test_kmod.o
@@ -275,7 +275,7 @@ $(obj)/default.bconf: $(CONFIG_BOOT_CONFIG_EMBED_FILE) FORCE
 
 obj-$(CONFIG_RBTREE_TEST) += rbtree_test.o
 
-obj-$(CONFIG_HAMT_TEST) += hamt_test.o
+obj-$(CONFIG_HAMT_TEST) += hamt_test1.o
 
 obj-$(CONFIG_INTERVAL_TREE_TEST) += interval_tree_test.o
 
