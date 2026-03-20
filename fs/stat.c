@@ -183,9 +183,10 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 {
 	struct mnt_idmap *idmap;
 	struct inode *inode = d_backing_inode(path->dentry);
-	//struct address_space *mapping = inode->i_mapping;
-	//int num = xarray_get_num_nodes(&mapping->i_pages);
-	//printk("ino: %lu xarray_num_nodes: %d\n", inode->i_ino, num);
+	struct address_space *mapping = inode->i_mapping;
+	int nnodes = xarray_get_num_nodes(&mapping->i_pages);
+	int nemptyslots = xarray_get_num_null_entries(&mapping->i_pages);
+	printk("ino: %lu xarray_num_nodes: %d xarray_get_num_null_entries: %d\n", inode->i_ino, nnodes, nemptyslots);
 
 	memset(stat, 0, sizeof(*stat));
 	stat->result_mask |= STATX_BASIC_STATS;

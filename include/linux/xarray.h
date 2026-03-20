@@ -351,7 +351,7 @@ struct xarray {
  * See also DEFINE_XARRAY().
  */
 #define DEFINE_XARRAY_ALLOC1(name) DEFINE_XARRAY_FLAGS(name, XA_FLAGS_ALLOC1)
-
+int xarray_get_num_null_entries(struct xarray *xa);
 int xarray_get_num_nodes(struct xarray *xa);
 void *xa_load(struct xarray *, unsigned long index);
 void *xa_store(struct xarray *, unsigned long index, void *entry, gfp_t);

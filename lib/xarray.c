@@ -1630,6 +1630,41 @@ out:
 	return len;
 }
 EXPORT_SYMBOL(xarray_get_num_nodes);
+
+int xarray_get_num_null_entries(struct xarray *xa) {
+	xa_lock(xa);
+	int count = 0;
+	int top = 0;
+	struct xa_node *node = xa_head(xa);
+	if (!node)
+		goto out;
+	if (!xa_is_node(node))
+                goto out;
+	stack[top++] = xa_to_node(node);
+	while(top > 0) {
+		node = stack[--top];
+		for (int i = 0; i < XA_CHUNK_SIZE; i++) {
+			void *curr = xa_entry_locked(xa, node, i);
+			if (!xa_is_internal(curr))
+				continue;
+
+			if (xa_is_node(curr)) {
+				int j;
+				struct xa_node *n = xa_to_node(curr);
+				stack[top++] = n;
+				for (j = 0; j < XA_CHUNK_SIZE; ++j)
+					if (!n->slots[j])
+						++count;
+			}
+		}
+	}
+out:
+	xa_unlock(xa);
+	return count;
+}
+EXPORT_SYMBOL(xarray_get_num_null_entries);
+
+
 /*
 unsigned long hamt_get_size(struct hamt_root *root) {
 	unsigned long size = 0;
