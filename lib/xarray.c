@@ -1645,16 +1645,13 @@ int xarray_get_num_null_entries(struct xarray *xa) {
 		node = stack[--top];
 		for (int i = 0; i < XA_CHUNK_SIZE; i++) {
 			void *curr = xa_entry_locked(xa, node, i);
-			if (!xa_is_internal(curr))
-				continue;
 
 			if (xa_is_node(curr)) {
-				int j;
 				struct xa_node *n = xa_to_node(curr);
 				stack[top++] = n;
-				for (j = 0; j < XA_CHUNK_SIZE; ++j)
-					if (!n->slots[j])
-						++count;
+			} else {
+				if (!curr)
+					++count;
 			}
 		}
 	}
