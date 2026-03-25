@@ -392,6 +392,7 @@ static void *xas_alloc(struct xa_state *xas, unsigned int shift)
 	XA_NODE_BUG_ON(node, !list_empty(&node->private_list));
 	node->shift = shift;
 	node->count = 0;
+	node->slots_sz = 2; // node->slots[] size = 2^slots_sz 
 	node->nr_values = 0;
 	RCU_INIT_POINTER(node->parent, xas->xa_node);
 	node->array = xas->xa;
@@ -1603,6 +1604,7 @@ EXPORT_SYMBOL_GPL(xas_find_conflict);
 
 
 static struct xa_node *stack[1000];
+static int stackdepth[1000];
 int xarray_get_num_nodes(struct xarray *xa) {
 	xa_lock(xa);
 	int len = 0;
@@ -1660,6 +1662,44 @@ out:
 	return count;
 }
 EXPORT_SYMBOL(xarray_get_num_null_entries);
+
+int xarray_print_num_null_entries_per_node(struct xarray *xa) {
+	printk("print_num_null_entries:\n");
+	xa_lock(xa);
+	int top = 0;
+	struct xa_node *node = xa_head(xa);
+	if (!node)
+		goto out;
+	if (!xa_is_node(node))
+                goto out;
+	stack[top] = xa_to_node(node);
+	stackdepth[top++] = 0;
+	while(top > 0) {
+		node = stack[--top];
+		int d = stackdepth[top];
+		int count = 0;
+		for (int i = 0; i < XA_CHUNK_SIZE; i++) {
+			void *curr = xa_entry_locked(xa, node, i);
+
+			if (xa_is_node(curr)) {
+				struct xa_node *n = xa_to_node(curr);
+				stack[top] = n;
+				stackdepth[top++] = d+1;
+			} else {
+				if (!curr)
+					++count;
+			}
+		}
+		printk("num null entries: %d depth: %d\n", count, d);
+	}
+out:
+	xa_unlock(xa);
+	return 0;
+}
+EXPORT_SYMBOL(xarray_print_num_null_entries_per_node);
+
+
+
 
 
 /*

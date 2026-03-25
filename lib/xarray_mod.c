@@ -30,6 +30,7 @@ static int getfilepagecacheinfo(char *filename) {
 	int nnodes = xarray_get_num_nodes(&mapping->i_pages);
 	int nemptyslots = xarray_get_num_null_entries(&mapping->i_pages);
 	printk("ino: %lu xarray_num_nodes: %d xarray_get_num_null_entries: %d\n", inode->i_ino, nnodes, nemptyslots);
+	xarray_print_num_null_entries_per_node(&mapping->i_pages);
 
 	// Log the inode number (i_ino field of the inode structure)
 	printk(KERN_INFO "Path name: %s, inode number: %lu\n", filename, inode->i_ino);

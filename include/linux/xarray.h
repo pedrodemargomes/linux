@@ -353,6 +353,7 @@ struct xarray {
 #define DEFINE_XARRAY_ALLOC1(name) DEFINE_XARRAY_FLAGS(name, XA_FLAGS_ALLOC1)
 int xarray_get_num_null_entries(struct xarray *xa);
 int xarray_get_num_nodes(struct xarray *xa);
+int xarray_print_num_null_entries_per_node(struct xarray *xa);
 void *xa_load(struct xarray *, unsigned long index);
 void *xa_store(struct xarray *, unsigned long index, void *entry, gfp_t);
 void *xa_erase(struct xarray *, unsigned long index);
@@ -1152,7 +1153,7 @@ static inline void xa_release(struct xarray *xa, unsigned long index)
  * doubled the number of slots per node, we'd get only 3 nodes per 4kB page.
  */
 #ifndef XA_CHUNK_SHIFT
-#define XA_CHUNK_SHIFT		(IS_ENABLED(CONFIG_BASE_SMALL) ? 4 : 6)
+#define XA_CHUNK_SHIFT		(IS_ENABLED(CONFIG_BASE_SMALL) ? 4 : 8)
 #endif
 #define XA_CHUNK_SIZE		(1UL << XA_CHUNK_SHIFT)
 #define XA_CHUNK_MASK		(XA_CHUNK_SIZE - 1)
@@ -1177,6 +1178,8 @@ struct xa_node {
 		struct list_head private_list;	/* For tree user */
 		struct rcu_head	rcu_head;	/* Used when freeing node */
 	};
+	DECLARE_BITMAP(index, XA_CHUNK_SIZE);
+	unsigned char slots_sz;
 	void __rcu	*slots[XA_CHUNK_SIZE];
 	union {
 		unsigned long	tags[XA_MAX_MARKS][XA_MARK_LONGS];
@@ -1204,6 +1207,42 @@ void xa_dump_node(const struct xa_node *);
 #define XA_BUG_ON(xa, x)	do { } while (0)
 #define XA_NODE_BUG_ON(node, x)	do { } while (0)
 #endif
+
+static inline void __rcu *get_node(struct xa_node *node,
+				   unsigned int offset)
+{
+	if (!test_bit(offset, node->index))
+		return NULL;
+	return node->slots[bitmap_weight(node->index, offset)];
+}
+
+static inline void __rcu **set_node(struct xa_node *node,
+				    unsigned int offset)
+{
+	if (test_bit(offset, node->index)) {
+		return &node->slots[bitmap_weight(node->index, offset)];
+		//printk("set_node hamtp: %px len: %d already inserted idx: %d\n", hamtp, hamtp->len, bitmap_weight(hamtp->index, key));
+	} else {
+		if (node->count >= (1 << node->slots_sz)) {
+			printk("increase slots node->count: %u\
+				node->slots_sz: %u\n",
+				node->count, node->slots_sz);
+			/*
+			*hamtpp = krealloc(*hamtpp, sizeof(struct hamt_node) + (hamtp->len_hashmap + 32)*sizeof(void *), GFP_KERNEL);
+			hamtp = *hamtpp;
+			hamtp->len_hashmap = hamtp->len_hashmap+32;
+			*/
+		}
+		unsigned int k = bitmap_weight(node->index, offset);	
+		//for (int i = hamtp->len; i > k; i--)
+		//	hamtp->hashmap[i] = hamtp->hashmap[i-1]; 
+		memmove(&node->slots[k+1], &node->slots[k], (node->count-k)*sizeof(void *));
+
+		set_bit(offset, node->index);
+		//hamtp->len++; count++ ?
+		return &node->slots[k];
+	}
+}
 
 /* Private */
 static inline void *xa_head(const struct xarray *xa)
