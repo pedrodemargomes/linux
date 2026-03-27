@@ -1,0 +1,357 @@
+19426c4988aa85298c1b4caf2889d37ec5c80fea BUG 
+8a2d9f00d502e6ef68c6d52f0863856040ddd2db NOT BUG
+
+
+BUG: 
+
+ebian GNU/Linux 13 syzkaller ttyS0
+
+syzkaller login: [   29.122886] loop0: detected capacity change from 0 to 131072
+[   29.127597] F2FS-fs (loop0): build fault injection attr: rate: 3, type: 0x3fffff
+[   29.130190] F2FS-fs (loop0): build fault injection attr: rate: 0, type: 0x4
+[   29.133601] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of get_checkpoint_version.constprop.0+0x26/0x5c0
+[   29.139429] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of read_compacted_summaries+0x167/0xd40
+[   29.146374] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_build_segment_manager+0x2ee2/0xadd0
+[   29.151604] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_build_segment_manager+0x4e66/0xadd0
+[   29.160298] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   29.163383] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   29.165479] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   29.174598] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_get_meta_page_retry+0x26/0x70
+[   29.179138] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_recover_fsync_data+0x3c2/0x7d20
+[   29.181385] F2FS-fs (loop0): Start checkpoint disabled!
+[   29.182691] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of commit_checkpoint+0x9a/0x580
+[   29.184795] F2FS-fs (loop0): Mounted with checkpoint version = 48b305e6
+[   29.229687] ==================================================================
+[   29.232144] BUG: KASAN: slab-use-after-free in down_read_trylock+0x77/0x1d0
+[   29.233472] Read of size 8 at addr ffff8881149e13a8 by task repro/293
+[   29.234709]
+[   29.235060] CPU: 0 UID: 0 PID: 293 Comm: repro Not tainted 6.14.0-rc1-00068-g19426c4988aa-dirty #94
+[   29.235067] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.17.0-9.fc43 06/10/2025
+[   29.235071] Call Trace:
+[   29.235074]  <TASK>
+[   29.235076]  dump_stack_lvl+0x4e/0x70
+[   29.235087]  ? down_read_trylock+0x77/0x1d0
+[   29.235091]  print_report+0x174/0x506
+[   29.235099]  ? __pfx__raw_spin_lock_irqsave+0x10/0x10
+[   29.235106]  ? down_read_trylock+0x77/0x1d0
+[   29.235110]  kasan_report+0xc6/0x100
+[   29.235117]  ? down_read_trylock+0x77/0x1d0
+[   29.235122]  kasan_check_range+0x10f/0x1e0
+[   29.235127]  down_read_trylock+0x77/0x1d0
+[   29.235132]  ? __pfx_down_read_trylock+0x10/0x10
+[   29.235136]  ? __remove_mapping+0x302/0x660
+[   29.235144]  ocfs2_read_virt_blocks+0x186/0x7a0
+[   29.235151]  ? __pfx_ocfs2_validate_quota_block+0x10/0x10
+[   29.235157]  ? __pfx_ocfs2_read_virt_blocks+0x10/0x10
+[   29.235161]  ? _raw_spin_lock_irq+0x81/0xe0
+[   29.235165]  ocfs2_read_quota_block+0x136/0x320
+[   29.235170]  ? __pfx_ocfs2_read_quota_block+0x10/0x10
+[   29.235174]  ocfs2_local_check_quota_file+0x132/0x9f0
+[   29.235178]  ? __pfx_ocfs2_local_check_quota_file+0x10/0x10
+[   29.235182]  ? __pfx_mutex_unlock+0x10/0x10
+[   29.235186]  ? __lru_add_drain_all+0x308/0x580
+[   29.235193]  dquot_load_quota_sb+0x48c/0xfa0
+[   29.235200]  dquot_load_quota_inode+0x1fe/0x3c0
+[   29.235205]  f2fs_quota_on+0x28f/0x3f0
+[   29.235211]  ? __pfx_f2fs_quota_on+0x10/0x10
+[   29.235215]  do_quotactl+0x724/0xe70
+[   29.235220]  ? __pfx_do_quotactl+0x10/0x10
+[   29.235223]  ? _raw_spin_lock+0x80/0xe0
+[   29.235228]  ? __pfx__raw_spin_lock+0x10/0x10
+[   29.235232]  ? quotactl_block+0xa2/0x3a0
+[   29.235236]  ? user_get_super+0xc5/0x1a0
+[   29.235243]  ? quotactl_block+0xe5/0x3a0
+[   29.235246]  ? user_path_at+0xa3/0xe0
+[   29.235252]  ? __pfx_quotactl_block+0x10/0x10
+[   29.235255]  __x64_sys_quotactl+0x27d/0x320
+[   29.235260]  ? __pfx___x64_sys_quotactl+0x10/0x10
+[   29.235264]  ? ksys_read+0x186/0x1c0
+[   29.235269]  ? fpregs_restore_userregs+0xda/0x1e0
+[   29.235275]  do_syscall_64+0x9e/0x1a0
+[   29.235282]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   29.235288] RIP: 0033:0x7ff05717c779
+[   29.235292] Code: ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 8b 0d 67 76 0d 00 f7 d8 64 89 01 48
+[   29.235296] RSP: 002b:00007ffc3492d1b8 EFLAGS: 00000246 ORIG_RAX: 00000000000000b3
+[   29.235302] RAX: ffffffffffffffda RBX: 0000000020000944 RCX: 00007ff05717c779
+[   29.235305] RDX: 0000000000000003 RSI: 0000000020000040 RDI: ffffffff80000202
+[   29.235307] RBP: 00007ffc3492d2a0 R08: 0000000001000000 R09: 0000000001000000
+[   29.235310] R10: 0000000020000080 R11: 0000000000000246 R12: 0000000000000000
+[   29.235312] R13: 00007ffc3492d3c8 R14: 00007ff0572aa000 R15: 0000556f70a76dd8
+[   29.235315]  </TASK>
+[   29.235317]
+[   29.291387] Allocated by task 293:
+[   29.292083]  kasan_save_stack+0x30/0x50
+[   29.292851]  kasan_save_track+0x14/0x30
+[   29.293613]  __kasan_slab_alloc+0x6e/0x70
+[   29.294426]  kmem_cache_alloc_lru_noprof+0x110/0x320
+[   29.295393]  f2fs_alloc_inode+0xd4/0x5e0
+[   29.296165]  alloc_inode+0x57/0x200
+[   29.297909]  iget_locked+0x249/0x6f0
+[   29.298636]  f2fs_iget+0x54/0x5ef0
+[   29.299325]  f2fs_lookup+0x3d3/0x980
+[   29.300058]  lookup_one_qstr_excl+0xea/0x150
+[   29.300914]  filename_create+0x19e/0x440
+[   29.301692]  do_mkdirat+0xa2/0x390
+[   29.302373]  __x64_sys_mkdir+0xcf/0x120
+[   29.303133]  do_syscall_64+0x9e/0x1a0
+[   29.303862]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   29.304850]
+[   29.305186] Freed by task 15:
+[   29.305936]  kasan_save_stack+0x30/0x50
+[   29.306713]  kasan_save_track+0x14/0x30
+[   29.307466]  kasan_save_free_info+0x3b/0x70
+[   29.308285]  __kasan_slab_free+0x37/0x50
+[   29.309055]  kmem_cache_free+0xc4/0x360
+[   29.309812]  rcu_core+0x9f7/0x19a0
+[   29.310500]  handle_softirqs+0x190/0x590
+[   29.311268]  run_ksoftirqd+0x20/0x30
+[   29.312002]  smpboot_thread_fn+0x271/0x630
+[   29.312812]  kthread+0x2f7/0x610
+[   29.313496]  ret_from_fork+0x2c/0x70
+[   29.315168]  ret_from_fork_asm+0x1a/0x30
+[   29.315955]
+[   29.316297] Last potentially related work creation:
+[   29.317255]  kasan_save_stack+0x30/0x50
+[   29.318040]  kasan_record_aux_stack+0x8c/0xa0
+[   29.319073]  __call_rcu_common.constprop.0+0x6b/0xab0
+[   29.320094]  evict+0x4aa/0x740
+[   29.320719]  f2fs_iget+0x1231/0x5ef0
+[   29.321423]  f2fs_lookup+0x3d3/0x980
+[   29.322304]  lookup_one_qstr_excl+0xea/0x150
+[   29.323159]  filename_create+0x19e/0x440
+[   29.323932]  do_mkdirat+0xa2/0x390
+[   29.324622]  __x64_sys_mkdir+0xcf/0x120
+[   29.325371]  do_syscall_64+0x9e/0x1a0
+[   29.326107]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   29.327106]
+[   29.327441] The buggy address belongs to the object at ffff8881149e0f78
+[   29.327441]  which belongs to the cache f2fs_inode_cache of size 1192
+[   29.330701] The buggy address is located 1072 bytes inside of
+[   29.330701]  freed 1192-byte region [ffff8881149e0f78, ffff8881149e1420)
+[   29.333011]
+[   29.333350] The buggy address belongs to the physical page:
+[   29.334426] page: refcount:0 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x1149e0
+[   29.335961] head: order:2 mapcount:0 entire_mapcount:0 nr_pages_mapped:0 pincount:0
+[   29.337404] flags: 0x200000000000040(head|node=0|zone=2)
+[   29.338800] page_type: f5(slab)
+[   29.339434] raw: 0200000000000040 ffff888100cb0a00 dead000000000122 0000000000000000
+[   29.340901] raw: 0000000000000000 00000000800c000c 00000000f5000000 0000000000000000
+[   29.342349] head: 0200000000000040 ffff888100cb0a00 dead000000000122 0000000000000000
+[   29.343861] head: 0000000000000000 00000000800c000c 00000000f5000000 0000000000000000
+[   29.345322] head: 0200000000000002 ffffea0004527801 ffffffffffffffff 0000000000000000
+[   29.347928] head: 0000000000000004 0000000000000000 00000000ffffffff 0000000000000000
+[   29.349423] page dumped because: kasan: bad access detected
+[   29.350496]
+[   29.350833] Memory state around the buggy address:
+[   29.351761]  ffff8881149e1280: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+[   29.353134]  ffff8881149e1300: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+[   29.354656] >ffff8881149e1380: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+[   29.356025]                                   ^
+[   29.356913]  ffff8881149e1400: fb fb fb fb fc fc fc fc fc fc fc fc fc fc fc fc
+[   29.358445]  ffff8881149e1480: fc fc fc fc 00 00 00 00 00 00 00 00 00 00 00 00
+[   29.359829] ==================================================================
+[   29.361363] Disabling lock debugging due to kernel taint
+[   29.366271] (repro,293,0):ocfs2_read_virt_blocks:988 ERROR: Inode #18446744071634972544 ip_alloc_sem is temporarily unavailable
+[   29.371016] (repro,293,0):ocfs2_read_quota_block:150 ERROR: status = -11
+[   29.372369] (repro,293,0):ocfs2_local_check_quota_file:177 ERROR: status = -11
+[   29.373835] (repro,293,0):ocfs2_local_check_quota_file:178 ERROR: failed to read quota file header (type=2)
+
+NO BUG:
+
+[   47.856482] loop0: detected capacity change from 0 to 131072
+[   47.860819] F2FS-fs (loop0): build fault injection attr: rate: 3, type: 0x1fffff
+[   47.864145] F2FS-fs (loop0): build fault injection attr: rate: 0, type: 0x4
+[   47.867161] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of get_checkpoint_version.constprop.0+0x26/0x5c0
+[   47.872736] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of read_compacted_summaries+0x167/0xd40
+[   47.881164] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_build_segment_manager+0x2ee2/0xadd0
+[   47.885233] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_build_segment_manager+0x4e66/0xadd0
+[   47.889397] F2FS-fs (loop0): Found nat_bits in checkpoint
+[   47.913750] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   47.915663] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   47.917710] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of __f2fs_build_free_nids+0x1c3/0x1180
+[   47.920676] F2FS-fs (loop0): inject page alloc in f2fs_grab_cache_folio of f2fs_get_node_page+0xb3/0x110
+[   47.922588] F2FS-fs (loop0): Failed to read root inode
+
+
+
+
+
+BUG REPORT
+
+All of lore.kernel.org
+ help / color / mirror / Atom feed
+
+From: Shuangpeng <shuangpeng.kernel@gmail.com>
+To: ocfs2-devel@lists.linux.dev
+Cc: mark@fasheh.com, jlbec@evilplan.org, joseph.qi@linux.alibaba.com,
+	linux-kernel@vger.kernel.org
+Subject: [BUG] ocfs2: slab-out-of-bounds in down_read_trylock from quota-on path
+Date: Wed, 25 Mar 2026 15:15:27 -0400	[thread overview]
+Message-ID: <40B9252B-5C73-47A8-BFE0-1A76B1D9F437@gmail.com> (raw)
+
+Hi Kernel Maintainers,
+
+I hit the following KASAN report while testing current upstream kernel:
+
+KASAN: slab-out-of-bounds in down_read_trylock
+
+on commit bbeb83d3182abe0d245318e274e8531e5dd7a948 (Mar 24 2026)
+
+The reproducer and .config files are here:
+https://gist.github.com/shuangpengbai/d2612321387d8c6be057b1a9a2e1c422
+
+The faulting access happens in ocfs2_read_virt_blocks() when it calls
+down_read_trylock(&OCFS2_I(inode)->ip_alloc_sem), but KASAN reports that
+the accessed object belongs to f2fs_inode_cache. This looks like OCFS2 code
+may be interpreting a non-OCFS2 inode as an OCFS2 inode, but I am not fully
+sure yet.
+
+I'm happy to test debug patches or provide additional information.
+
+Reported-by: Shuangpeng Bai <shuangpeng.kernel@gmail.com>
+
+
+[   52.307203][ T8456] ==================================================================
+[   52.310017][ T8456] BUG: KASAN: slab-out-of-bounds in down_read_trylock (./arch/x86/include/asm/atomic64_64.h:15 ./include/linux/atomic/atomic-arch-fallback.h:2583 ./include/linux/atomic/atomic-long.h:38 ./include/linux/atomic/atomic-instrumented.h:3189 kernel/locking/rwsem.c:1295 kernel/locking/rwsem.c:1576)
+[   52.312429][ T8456] Read of size 8 at addr ffff8881641a21d0 by task a.out/8456
+[   52.313159][ T8456]
+[   52.313410][ T8456] CPU: 0 UID: 0 PID: 8456 Comm: a.out Not tainted 6.19.0-08383-g99a19d63fa32 #34 PREEMPT(full)
+[   52.313417][ T8456] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+[   52.313421][ T8456] Call Trace:
+[   52.313423][ T8456]  <TASK>
+[   52.313425][ T8456]  dump_stack_lvl (lib/dump_stack.c:122)
+[   52.313433][ T8456]  print_report (mm/kasan/report.c:379 mm/kasan/report.c:482)
+[   52.313462][ T8456]  kasan_report (mm/kasan/report.c:597)
+[   52.313480][ T8456]  kasan_check_range (mm/kasan/generic.c:? mm/kasan/generic.c:200)
+[   52.313486][ T8456]  down_read_trylock (./arch/x86/include/asm/atomic64_64.h:15 ./include/linux/atomic/atomic-arch-fallback.h:2583 ./include/linux/atomic/atomic-long.h:38 ./include/linux/atomic/atomic-instrumented.h:3189 kernel/locking/rwsem.c:1295 kernel/locking/rwsem.c:1576)
+[   52.313498][ T8456]  ocfs2_read_virt_blocks (fs/ocfs2/extent_map.c:994)
+[   52.313540][ T8456]  ocfs2_read_quota_block (fs/ocfs2/quota_local.c:147)
+[   52.313556][ T8456]  ocfs2_local_check_quota_file (fs/ocfs2/quota_local.c:175)
+[   52.313585][ T8456]  dquot_load_quota_sb (fs/quota/dquot.c:2455)
+[   52.313591][ T8456]  dquot_load_quota_inode (fs/quota/dquot.c:2499)
+[   52.313598][ T8456]  f2fs_quota_on (fs/f2fs/super.c:3414)
+[   52.313604][ T8456]  __se_sys_quotactl (fs/quota/quota.c:960 fs/quota/quota.c:916)
+[   52.313629][ T8456]  do_syscall_64 (arch/x86/entry/syscall_64.c:?)
+[   52.313633][ T8456]  entry_SYSCALL_64_after_hwframe (arch/x86/entry/entry_64.S:130)
+[   52.313638][ T8456] RIP: 0033:0x7f00b1646f29
+[   52.313646][ T8456] Code: 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 48
+
+Code starting with the faulting instruction
+===========================================
+   0:	00 c3                	add    %al,%bl
+   2:	66 2e 0f 1f 84 00 00 	cs nopw 0x0(%rax,%rax,1)
+   9:	00 00 00 
+   c:	0f 1f 44 00 00       	nopl   0x0(%rax,%rax,1)
+  11:	48 89 f8             	mov    %rdi,%rax
+  14:	48 89 f7             	mov    %rsi,%rdi
+  17:	48 89 d6             	mov    %rdx,%rsi
+  1a:	48 89 ca             	mov    %rcx,%rdx
+  1d:	48                   	rex.W
+[   52.313651][ T8456] RSP: 002b:00007fff9de6e208 EFLAGS: 00000246 ORIG_RAX: 00000000000000b3
+[   52.313658][ T8456] RAX: ffffffffffffffda RBX: 0000000020000944 RCX: 00007f00b1646f29
+[   52.313661][ T8456] RDX: 0000000000000003 RSI: 0000000020000040 RDI: ffffffff80000202
+[   52.313665][ T8456] RBP: 00007fff9de6e2f0 R08: 0000000000000000 R09: 0000000000000000
+[   52.313668][ T8456] R10: 0000000020000080 R11: 0000000000000246 R12: 000056025d47a220
+[   52.313671][ T8456] R13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000000
+[   52.313675][ T8456]  </TASK>
+[   52.313677][ T8456]
+[   52.342046][ T8456] The buggy address belongs to the object at ffff8881641a1dd0
+[   52.342046][ T8456]  which belongs to the cache f2fs_inode_cache of size 1144
+[   52.343498][ T8456] The buggy address is located 1024 bytes inside of
+[   52.343498][ T8456]  allocated 1144-byte region [ffff8881641a1dd0, ffff8881641a2248)
+[   52.344931][ T8456]
+[   52.345181][ T8456] The buggy address belongs to the physical page:
+[   52.345836][ T8456] page: refcount:0 mapcount:0 mapping:0000000000000000 index:0xffff8881641a3ba0 pfn:0x1641a0
+[   52.346859][ T8456] head: order:3 mapcount:0 entire_mapcount:0 nr_pages_mapped:0 pincount:0
+[   52.347717][ T8456] memcg:ffff8881641a7c39
+[   52.348161][ T8456] flags: 0x17ff00000000240(workingset|head|node=0|zone=2|lastcpupid=0x7ff)
+[   52.349030][ T8456] page_type: f5(slab)
+[   52.349443][ T8456] raw: 017ff00000000240 ffff88810e6f0640 ffff88810e6d1690 ffff88810e6d1690
+[   52.350313][ T8456] raw: ffff8881641a3ba0 000000080019000c 00000000f5000000 ffff8881641a7c39
+[   52.351182][ T8456] head: 017ff00000000240 ffff88810e6f0640 ffff88810e6d1690 ffff88810e6d1690
+[   52.352063][ T8456] head: ffff8881641a3ba0 000000080019000c 00000000f5000000 ffff8881641a7c39
+[   52.352941][ T8456] head: 017ff00000000003 ffffea0005906801 00000000ffffffff 00000000ffffffff
+[   52.353818][ T8456] head: ffffffffffffffff 0000000000000000 00000000ffffffff 0000000000000008
+[   52.354693][ T8456] page dumped because: kasan: bad access detected
+[   52.355345][ T8456] page_owner tracks the page as allocated
+[   52.355932][ T8456] page last allocated via order 3, migratetype Reclaimable, gfp_mask 0xd2050(__GFP_RECLAIMABLE|_7
+[   52.358085][ T8456]  post_alloc_hook (./include/linux/page_owner.h:? mm/page_alloc.c:1884)
+[   52.358576][ T8456]  get_page_from_freelist (mm/page_alloc.c:? mm/page_alloc.c:3950)
+[   52.359133][ T8456]  __alloc_frozen_pages_noprof (mm/page_alloc.c:5245)
+[   52.359722][ T8456]  allocate_slab (mm/slub.c:3240 mm/slub.c:3411)
+[   52.360179][ T8456]  refill_objects (mm/slub.c:7092)
+[   52.360653][ T8456]  refill_sheaf (mm/slub.c:2790)
+[   52.361091][ T8456]  __pcs_replace_empty_main (mm/slub.c:2808 mm/slub.c:4546)
+[   52.361651][ T8456]  kmem_cache_alloc_lru_noprof (mm/slub.c:4640 mm/slub.c:4773 mm/slub.c:4807)
+[   52.362239][ T8456]  f2fs_alloc_inode (fs/f2fs/super.c:1753)
+[   52.362732][ T8456]  alloc_inode (fs/inode.c:?)
+[   52.363169][ T8456]  iget_locked (fs/inode.c:1472)
+[   52.363616][ T8456]  f2fs_iget (fs/f2fs/inode.c:575)
+[   52.364048][ T8456]  f2fs_fill_super (fs/f2fs/super.c:5026)
+[   52.364550][ T8456]  get_tree_bdev_flags (fs/super.c:1695)
+[   52.365071][ T8456]  vfs_get_tree (fs/super.c:1754)
+[   52.365522][ T8456]  do_new_mount (fs/namespace.c:1194 fs/namespace.c:3760 fs/namespace.c:3836)
+[   52.365987][ T8456] page last free pid 1 tgid 1 stack trace:
+[   52.366581][ T8456]  __free_frozen_pages (./include/linux/page_owner.h:? mm/page_alloc.c:1433 mm/page_alloc.c:2973)
+[   52.367108][ T8456]  free_contig_range (mm/page_alloc.c:7237)
+[   52.367618][ T8456]  destroy_args (mm/debug_vm_pgtable.c:?)
+[   52.368088][ T8456]  debug_vm_pgtable (mm/debug_vm_pgtable.c:?)
+[   52.368590][ T8456]  do_one_initcall (init/main.c:1378)
+[   52.369084][ T8456]  do_initcall_level (init/main.c:1439)
+[   52.369596][ T8456]  do_initcalls (init/main.c:1453)
+[   52.370043][ T8456]  kernel_init_freeable (init/main.c:1692)
+[   52.370580][ T8456]  kernel_init (init/main.c:1580)
+[   52.371027][ T8456]  ret_from_fork (arch/x86/kernel/process.c:164)
+[   52.371506][ T8456]  ret_from_fork_asm (arch/x86/entry/entry_64.S:255)
+[   52.372006][ T8456]
+[   52.372254][ T8456] Memory state around the buggy address:
+[   52.372827][ T8456]  ffff8881641a2080: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+[   52.373641][ T8456]  ffff8881641a2100: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+[   52.374456][ T8456] >ffff8881641a2180: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+[   52.375275][ T8456]                                                  ^
+[   52.375962][ T8456]  ffff8881641a2200: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+[   52.376779][ T8456]  ffff8881641a2280: fc fc fc fc fc fc fc fc fc 00 00 00 00 00 00 00
+[   52.377593][ T8456] ==================================================================
+
+
+Best,
+Shuangpeng
+
+                 reply	other threads:[~2026-03-25 19:15 UTC|newest]
+
+Thread overview: [no followups] expand[flat|nested]  mbox.gz  Atom feed
+
+Reply instructions:
+
+You may reply publicly to this message via plain-text email
+using any one of the following methods:
+
+* Save the following mbox file, import it into your mail client,
+  and reply-to-all from there: mbox
+
+  Avoid top-posting and favor interleaved quoting:
+  https://en.wikipedia.org/wiki/Posting_style#Interleaved_style
+
+* Reply using the --to, --cc, and --in-reply-to
+  switches of git-send-email(1):
+
+  git send-email \
+    --in-reply-to=40B9252B-5C73-47A8-BFE0-1A76B1D9F437@gmail.com \
+    --to=shuangpeng.kernel@gmail.com \
+    --cc=jlbec@evilplan.org \
+    --cc=joseph.qi@linux.alibaba.com \
+    --cc=linux-kernel@vger.kernel.org \
+    --cc=mark@fasheh.com \
+    --cc=ocfs2-devel@lists.linux.dev \
+    /path/to/YOUR_REPLY
+
+  https://kernel.org/pub/software/scm/git/docs/git-send-email.html
+
+* If your mail client supports setting the In-Reply-To header
+  via mailto: links, try the mailto: link
+
+Be sure your reply has a Subject: header at the top and a blank line before the message body.
+
+This is an external index of several public inboxes,
+see mirroring instructions on how to clone and mirror
+all data and code used by this external index.
