@@ -355,3 +355,15 @@ Be sure your reply has a Subject: header at the top and a blank line before the 
 This is an external index of several public inboxes,
 see mirroring instructions on how to clone and mirror
 all data and code used by this external index.
+
+
+
+o bug acontece pois o format_id 3 de quota usado nesse fs é somente utilizado
+pelo ocfs2. Quanto o syscall __NR_quotactl a função f2fs_quota_on-...-> find_quota_format
+percorre a lista de quota formats conhecidos:
+
+(gdb) p *quota_formats $5 = {qf_fmt_id = 4, qf_ops = 0xffffffff8459bbc0 <v2_format_ops>, qf_owner = 0x0 <fixed_percpu_data>, qf_next = 0xffffffff85452920 <v2r0_quota_format>}
+(gdb) p *quota_formats->qf_next $6 = {qf_fmt_id = 4, qf_ops = 0xffffffff8459bbc0 <v2_format_ops>, qf_owner = 0x0 <fixed_percpu_data>, qf_next = 0xffffffff85452920 <v2r0_quota_format>}
+(gdb) p *quota_formats->qf_next->qf_next $7 = {qf_fmt_id = 2, qf_ops = 0xffffffff8459bbc0 <v2_format_ops>, qf_owner = 0x0 <fixed_percpu_data>, qf_next = 0x0 <fixed_percpu_data>}
+
+e o inode de quota é lido como se fosse do fs OCFS2 
