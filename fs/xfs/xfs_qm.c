@@ -819,6 +819,7 @@ xfs_qm_init_quotainfo(
 
 	ASSERT(XFS_IS_QUOTA_ON(mp));
 
+	printk("m_quotainfo kzalloc\n");
 	qinf = mp->m_quotainfo = kzalloc(sizeof(struct xfs_quotainfo),
 					GFP_KERNEL | __GFP_NOFAIL);
 
@@ -899,6 +900,8 @@ out_free_lru:
 	list_lru_destroy(&qinf->qi_lru);
 out_free_qinf:
 	kfree(qinf);
+
+	printk("m_quotainfo = NULL out_free_qinf\n");
 	mp->m_quotainfo = NULL;
 	return error;
 }
@@ -923,6 +926,7 @@ xfs_qm_destroy_quotainfo(
 	mutex_destroy(&qi->qi_tree_lock);
 	mutex_destroy(&qi->qi_quotaofflock);
 	kfree(qi);
+	printk("m_quotainfo = NULL destroy_quotainfo\n");
 	mp->m_quotainfo = NULL;
 }
 
@@ -1654,6 +1658,8 @@ xfs_qm_mount_quotas(
 {
 	int			error = 0;
 	uint			sbf;
+
+	printk("xfs_qm_mount_quotas\n");
 
 	/*
 	 * If quotas on realtime volumes is not supported, disable quotas

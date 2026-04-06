@@ -503,6 +503,9 @@ xfs_inode_verifier_error(
 
 	fa = failaddr ? failaddr : __return_address;
 
+	printk("xfs_inode_verifier_error\n");
+	dump_stack();
+
 	xfs_alert(mp, "Metadata %s detected at %pS, inode 0x%llx %s",
 		  error == -EFSBADCRC ? "CRC error" : "corruption",
 		  fa, ip->i_ino, name);

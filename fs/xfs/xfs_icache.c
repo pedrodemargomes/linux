@@ -2187,6 +2187,7 @@ xfs_inodegc_queue(
 
 	cpu_nr = get_cpu();
 	gc = this_cpu_ptr(mp->m_inodegc);
+	printk("add inode %llu to gc->list Caller is %pS %pS\n", ip->i_ino , __builtin_return_address(0),  __builtin_return_address(1));
 	llist_add(&ip->i_gclist, &gc->list);
 	items = READ_ONCE(gc->items);
 	WRITE_ONCE(gc->items, items + 1);

@@ -1019,6 +1019,7 @@ xfs_qm_dqget_inode(
 	id = xfs_qm_id_for_quotatype(ip, type);
 
 restart:
+	printk("qi: %p id: %u type: %d\n", qi, id, type);
 	dqp = xfs_qm_dqget_cache_lookup(mp, qi, tree, id);
 	if (dqp) {
 		*O_dqpp = dqp;

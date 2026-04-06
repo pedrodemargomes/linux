@@ -1092,7 +1092,7 @@ xfs_mountfs(
 		 * Free up the root inode.
 		 */
 		xfs_warn(mp, "failed to read RT inodes");
-		goto out_rele_rip;
+		goto out_rtunmount;
 	}
 
 	/* Make sure the summary counts are ok. */
@@ -1117,6 +1117,7 @@ xfs_mountfs(
 	 * Initialise the XFS quota management subsystem for this mount
 	 */
 	if (XFS_IS_QUOTA_ON(mp)) {
+		printk("XFS_IS_QUOTA_ON(mp)\n");
 		error = xfs_qm_newmount(mp, &quotamount, &quotaflags);
 		if (error)
 			goto out_rtunmount;
@@ -1174,10 +1175,12 @@ xfs_mountfs(
 	/*
 	 * Complete the quota initialisation, post-log-replay component.
 	 */
+	printk("quotamount: %d\n", quotamount);
 	if (quotamount) {
 		ASSERT(mp->m_qflags == 0);
 		mp->m_qflags = quotaflags;
 
+		printk("xfs_mountfs calling xfs_qm_mount_quotas");
 		xfs_qm_mount_quotas(mp);
 	}
 
@@ -1231,6 +1234,7 @@ xfs_mountfs(
  out_rele_rip:
 	xfs_irele(rip);
 	/* Clean out dquots that might be in memory after quotacheck. */
+	printk("mp->m_quotainfo: %p\n", mp->m_quotainfo);
 	xfs_qm_unmount(mp);
  out_free_metadir:
 	if (mp->m_metadirip)
@@ -1242,6 +1246,7 @@ xfs_mountfs(
 	 * inodes and the root directory shouldn't need inactivation, but the
 	 * mount failed for some reason, so pull down all the state and flee.
 	 */
+	printk("xfs_inodegc_flush\n");
 	xfs_inodegc_flush(mp);
 
 	/*
@@ -1255,6 +1260,7 @@ xfs_mountfs(
 	 * qm_unmount_quotas and therefore rely on qm_unmount to release the
 	 * quota inodes.
 	 */
+	printk("xfs_unmount_flush_inodes\n");
 	xfs_unmount_flush_inodes(mp);
 	xfs_log_mount_cancel(mp);
  out_inodegc_shrinker:
