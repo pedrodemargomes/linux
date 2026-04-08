@@ -339,6 +339,7 @@ xfs_qm_need_dqattach(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 
+	printk("xfs_qm_need_dqattach mp->m_qflags: %u\n", mp->m_qflags);
 	if (!XFS_IS_QUOTA_ON(mp))
 		return false;
 	if (!XFS_NOT_DQATTACHED(mp, ip))

@@ -825,6 +825,11 @@ xfs_mountfs(
 	int			error = 0;
 	int			i;
 
+
+	printk("xfs_mounfs mp->m_qflags: %u\nNow zeroing it\n", mp->m_qflags);
+	quotaflags = mp->m_qflags;
+	mp->m_qflags = 0;
+
 	xfs_sb_mount_common(mp, sbp);
 
 	/*
@@ -1092,7 +1097,7 @@ xfs_mountfs(
 		 * Free up the root inode.
 		 */
 		xfs_warn(mp, "failed to read RT inodes");
-		goto out_rtunmount;
+		goto out_rele_rip;
 	}
 
 	/* Make sure the summary counts are ok. */
@@ -1116,6 +1121,7 @@ xfs_mountfs(
 	/*
 	 * Initialise the XFS quota management subsystem for this mount
 	 */
+	mp->m_qflags = quotaflags;
 	if (XFS_IS_QUOTA_ON(mp)) {
 		printk("XFS_IS_QUOTA_ON(mp)\n");
 		error = xfs_qm_newmount(mp, &quotamount, &quotaflags);
