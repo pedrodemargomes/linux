@@ -1245,6 +1245,9 @@ xfs_mountfs(
 	if (mp->m_metadirip)
 		xfs_irele(mp->m_metadirip);
 
+	if (!mp->m_quotainfo)
+		mp->m_qflags = 0;
+
 	/*
 	 * Inactivate all inodes that might still be in memory after a log
 	 * intent recovery failure so that reclaim can free them.  Metadata
