@@ -3857,6 +3857,7 @@ static int ext4_iomap_begin_report(struct inode *inode, loff_t offset,
 				   loff_t length, unsigned int flags,
 				   struct iomap *iomap, struct iomap *srcmap)
 {
+	printk("ext4_iomap_begin_report");
 	int ret;
 	struct ext4_map_blocks map;
 	u8 blkbits = inode->i_blkbits;
@@ -3888,14 +3889,17 @@ static int ext4_iomap_begin_report(struct inode *inode, loff_t offset,
 	 */
 	if (!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))) {
 		struct ext4_sb_info *sbi = EXT4_SB(inode->i_sb);
+		printk("ext4_iomap_begin_report !(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) offset: %lld sbi->s_bitmap_maxbytes: %lld", offset, sbi->s_bitmap_maxbytes);
 
 		if (offset >= sbi->s_bitmap_maxbytes) {
+			printk("ext4_iomap_begin_report offset >= sbi->s_bitmap_maxbytes");
 			map.m_flags = 0;
 			goto set_iomap;
 		}
 	}
 
 	ret = ext4_map_blocks(NULL, inode, &map, 0);
+	printk("ext4_iomap_begin_report ret: %d", ret);
 	if (ret < 0)
 		return ret;
 set_iomap:

@@ -63,6 +63,7 @@ static int iomap_seek_data_iter(struct iomap_iter *iter,
 	case IOMAP_UNWRITTEN:
 		*hole_pos = mapping_seek_hole_data(iter->inode->i_mapping,
 				iter->pos, iter->pos + length, SEEK_DATA);
+		printk("iomap_seek_data_iter *hole_pos: %lld length: %lld", *hole_pos, length);
 		if (*hole_pos < 0)
 			return iomap_iter_advance(iter, length);
 		return 0;
@@ -75,6 +76,7 @@ static int iomap_seek_data_iter(struct iomap_iter *iter,
 loff_t
 iomap_seek_data(struct inode *inode, loff_t pos, const struct iomap_ops *ops)
 {
+	printk("iomap_seek_data pos: %lld", pos);
 	loff_t size = i_size_read(inode);
 	struct iomap_iter iter = {
 		.inode	= inode,
@@ -88,8 +90,13 @@ iomap_seek_data(struct inode *inode, loff_t pos, const struct iomap_ops *ops)
 		return -ENXIO;
 
 	iter.len = size - pos;
-	while ((ret = iomap_iter(&iter, ops)) > 0)
+	while ((ret = iomap_iter(&iter, ops)) > 0) {
 		iter.status = iomap_seek_data_iter(&iter, &pos);
+		printk("iomap_seek_data while pos: %lld iter.status: %d", pos, iter.status);
+	}
+	printk("iomap_seek_data ret: %d", ret);
+	printk("iomap_seek_data iter.status: %d", iter.status);
+	printk("iomap_seek_data iter.len: %lld", iter.len);
 	if (ret < 0)
 		return ret;
 	if (iter.len) /* found data before EOF */

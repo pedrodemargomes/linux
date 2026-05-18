@@ -103,10 +103,12 @@ int iomap_iter(struct iomap_iter *iter, const struct iomap_ops *ops)
 	else
 		ret = 1;
 	iomap_iter_reset_iomap(iter);
+	printk("iomap_iter ret: %d iter->len: %lld advanced: %ld stale: %d", ret, iter->len, advanced, stale);
 	if (ret <= 0)
 		return ret;
 
 begin:
+	printk("iomap_iter begin iter->pos: %lld iter->len: %lld iter->iter_start_pos: %lld iter->status: %d iter->flags: %u", iter->pos, iter->len, iter->iter_start_pos, iter->status, iter->flags);
 	ret = ops->iomap_begin(iter->inode, iter->pos, iter->len, iter->flags,
 			       &iter->iomap, &iter->srcmap);
 	if (ret < 0)

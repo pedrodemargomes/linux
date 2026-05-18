@@ -960,8 +960,10 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 		break;
 	case SEEK_DATA:
 		inode_lock_shared(inode);
+		printk("ext4_llseek maxbytes: %lld", maxbytes);
 		offset = iomap_seek_data(inode, offset,
 					 &ext4_iomap_report_ops);
+		printk("ext4_llseek offset: %lld", offset);
 		inode_unlock_shared(inode);
 		break;
 	}
