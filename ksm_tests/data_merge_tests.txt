@@ -1,0 +1,136 @@
+PATCHED
+
+root@syzkaller:~# bpftrace -e 'tracepoint:ksm:ksm_start_scan { @start_ns = nsecs; } tracepoint:ksm:ksm_stop_scan { $elapsed = (nsecs - @start_ns); printf("KSM scan finished in %llu ns\n", $elapsed); delete(@start_ns); }'
+Attaching 2 probes...
+KSM scan finished in 24708311604 ns
+KSM scan finished in 6010809723 ns
+KSM scan finished in 5975945790 ns
+KSM scan finished in 6080277299 ns
+KSM scan finished in 750757687 ns
+KSM scan finished in 6088038247 ns
+KSM scan finished in 790420544 ns
+KSM scan finished in 800729770 ns
+KSM scan finished in 6194227065 ns
+KSM scan finished in 759444550 ns
+KSM scan finished in 743380200 ns
+KSM scan finished in 740344037 ns
+KSM scan finished in 733793709 ns
+KSM scan finished in 6080327092 ns
+KSM scan finished in 741361185 ns
+KSM scan finished in 789090034 ns
+KSM scan finished in 789746827 ns
+KSM scan finished in 770217693 ns
+KSM scan finished in 786592014 ns
+KSM scan finished in 804447432 ns
+KSM scan finished in 829590880 ns
+KSM scan finished in 807644290 ns
+KSM scan finished in 6240828045 ns
+KSM scan finished in 810738930 ns
+KSM scan finished in 800176082 ns
+KSM scan finished in 775332425 ns
+KSM scan finished in 785705603 ns
+KSM scan finished in 775807233 ns
+KSM scan finished in 791800158 ns
+KSM scan finished in 755458969 ns
+KSM scan finished in 762052088 ns
+KSM scan finished in 6162713088 ns
+KSM scan finished in 770537677 ns
+KSM scan finished in 777981781 ns
+KSM scan finished in 798220832 ns
+KSM scan finished in 797850616 ns
+KSM scan finished in 788880181 ns
+KSM scan finished in 776445603 ns
+KSM scan finished in 775017918 ns
+KSM scan finished in 741427104 ns
+KSM scan finished in 6061914315 ns
+KSM scan finished in 737797330 ns
+KSM scan finished in 745900779 ns
+KSM scan finished in 728733347 ns
+KSM scan finished in 743212580 ns
+KSM scan finished in 742777656 ns
+KSM scan finished in 792533244 ns
+KSM scan finished in 753990588 ns
+KSM scan finished in 738110494 ns
+KSM scan finished in 6023712750 ns
+KSM scan finished in 755303232 ns
+KSM scan finished in 760499464 ns
+KSM scan finished in 779323438 ns
+KSM scan finished in 780064446 ns
+KSM scan finished in 750461025 ns
+KSM scan finished in 770314834 ns
+KSM scan finished in 773681744 ns
+KSM scan finished in 746311340 ns
+
+ORIG
+
+root@syzkaller:~# bpftrace -e 'tracepoint:ksm:ksm_start_scan { @start_ns = nsecs; } tracepoint:ksm:ksm_stop_scan { $elapsed = (nsecs - @start_ns); printf("KSM scan finished in %llu ns\n", $elapsed); delete(@start_ns); }'
+Attaching 2 probes...
+KSM scan finished in 27858021869 ns
+KSM scan finished in 34630582319 ns
+KSM scan finished in 34298415503 ns
+KSM scan finished in 35567817879 ns
+KSM scan finished in 727150072 ns
+KSM scan finished in 35728587355 ns
+KSM scan finished in 782715440 ns
+KSM scan finished in 822630173 ns
+KSM scan finished in 34459962976 ns
+KSM scan finished in 731727861 ns
+KSM scan finished in 738954699 ns
+KSM scan finished in 730146633 ns
+KSM scan finished in 727638802 ns
+KSM scan finished in 34767888837 ns
+KSM scan finished in 731608296 ns
+KSM scan finished in 727122287 ns
+KSM scan finished in 773108521 ns
+KSM scan finished in 722746116 ns
+KSM scan finished in 758648104 ns
+KSM scan finished in 824242442 ns
+KSM scan finished in 766028609 ns
+KSM scan finished in 766113088 ns
+KSM scan finished in 35519572899 ns
+KSM scan finished in 806077752 ns
+KSM scan finished in 735743378 ns
+KSM scan finished in 737012861 ns
+KSM scan finished in 726039534 ns
+KSM scan finished in 734034408 ns
+KSM scan finished in 752992113 ns
+KSM scan finished in 732437993 ns
+KSM scan finished in 791899796 ns
+KSM scan finished in 36754245916 ns
+KSM scan finished in 775226558 ns
+KSM scan finished in 793464419 ns
+KSM scan finished in 778140538 ns
+KSM scan finished in 807788769 ns
+KSM scan finished in 807656510 ns
+KSM scan finished in 795695128 ns
+KSM scan finished in 757990662 ns
+KSM scan finished in 764579350 ns
+KSM scan finished in 36432519051 ns
+KSM scan finished in 816718445 ns
+KSM scan finished in 801456752 ns
+KSM scan finished in 752170072 ns
+KSM scan finished in 754254328 ns
+KSM scan finished in 772347913 ns
+KSM scan finished in 794647504 ns
+KSM scan finished in 778008597 ns
+KSM scan finished in 753834274 ns
+KSM scan finished in 34664149724 ns
+KSM scan finished in 732391927 ns
+KSM scan finished in 730522733 ns
+KSM scan finished in 733055845 ns
+KSM scan finished in 753623060 ns
+KSM scan finished in 720097621 ns
+KSM scan finished in 719833789 ns
+KSM scan finished in 733003243 ns
+KSM scan finished in 790279130 ns
+
+
+
+
+
+
+
+58 scans	PATCHED		121847114611	ns
+		ORIG		416445370473	ns
+		SPEED UP	3.41776965176822
+
