@@ -212,7 +212,7 @@ struct ksm_rmap_item {
 	};
 	struct mm_struct *mm;
 	unsigned long address;		/* + low bits used for flags below */
-	unsigned int oldchecksum;	/* when unstable */
+	unsigned int oldchecksum;
 	rmap_age_t age;
 	rmap_age_t remaining_skips;
 	union {
