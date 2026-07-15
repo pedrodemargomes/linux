@@ -1481,10 +1481,10 @@ out:
  * This function returns 0 if the pages were merged, -EFAULT otherwise.
  */
 static int try_to_merge_one_page(struct vm_area_struct *vma,
-				 struct page *page, struct page *kpage)
+				 struct page *page, struct page *kpage,
+				 pte_t *orig_pte, void **save_mapping)
 {
 	struct folio *folio = page_folio(page);
-	pte_t orig_pte = __pte(0);
 	int err = -EFAULT;
 
 	if (page == kpage)			/* ksm page forked */
@@ -1514,8 +1514,9 @@ static int try_to_merge_one_page(struct vm_area_struct *vma,
 	 * ptes are necessarily already write-protected.  But in either
 	 * case, we need to lock and check page_count is not raised.
 	 */
-	if (write_protect_page(vma, folio, &orig_pte) == 0) {
+	if (write_protect_page(vma, folio, orig_pte) == 0) {
 		if (!kpage) {
+			*save_mapping = folio->mapping;
 			/*
 			 * While we hold folio lock, upgrade folio from
 			 * anon to a NULL stable_node with the KSM flag set:
@@ -1531,7 +1532,7 @@ static int try_to_merge_one_page(struct vm_area_struct *vma,
 				folio_mark_dirty(folio);
 			err = 0;
 		} else if (pages_identical(page, kpage))
-			err = replace_page(vma, page, kpage, orig_pte);
+			err = replace_page(vma, page, kpage, *orig_pte);
 	}
 
 out_unlock:
@@ -1549,6 +1550,8 @@ static int try_to_merge_with_zero_page(struct ksm_rmap_item *rmap_item,
 {
 	struct mm_struct *mm = rmap_item->mm;
 	int err = -EFAULT;
+	pte_t orig_pte = __pte(0);
+	void *save_mapping;
 
 	/*
 	 * Same checksum as an empty page. We attempt to merge it with the
@@ -1561,7 +1564,9 @@ static int try_to_merge_with_zero_page(struct ksm_rmap_item *rmap_item,
 		vma = find_mergeable_vma(mm, rmap_item->address);
 		if (vma) {
 			err = try_to_merge_one_page(vma, page,
-					ZERO_PAGE(rmap_item->address));
+					ZERO_PAGE(rmap_item->address),
+					&orig_pte,
+					&save_mapping);
 			trace_ksm_merge_one_page(
 				page_to_pfn(ZERO_PAGE(rmap_item->address)),
 				rmap_item, mm, err);
@@ -1585,7 +1590,8 @@ static int try_to_merge_with_zero_page(struct ksm_rmap_item *rmap_item,
  * This function returns 0 if the pages were merged, -EFAULT otherwise.
  */
 static int try_to_merge_with_ksm_page(struct ksm_rmap_item *rmap_item,
-				      struct page *page, struct page *kpage)
+				      struct page *page, struct page *kpage,
+				      pte_t *orig_pte, void **save_mapping)
 {
 	struct mm_struct *mm = rmap_item->mm;
 	struct vm_area_struct *vma;
@@ -1596,7 +1602,7 @@ static int try_to_merge_with_ksm_page(struct ksm_rmap_item *rmap_item,
 	if (!vma)
 		goto out;
 
-	err = try_to_merge_one_page(vma, page, kpage);
+	err = try_to_merge_one_page(vma, page, kpage, orig_pte, save_mapping);
 	if (err)
 		goto out;
 
@@ -1629,17 +1635,81 @@ static struct folio *try_to_merge_two_pages(struct ksm_rmap_item *rmap_item,
 					   struct page *tree_page)
 {
 	int err;
+	pte_t orig_pte_rmap_item = __pte(0);
+	void *save_mapping_rmap_item;
+	struct mmu_notifier_range range;
 
-	err = try_to_merge_with_ksm_page(rmap_item, page, NULL);
+	err = try_to_merge_with_ksm_page(rmap_item, page, NULL,
+					 &orig_pte_rmap_item, &save_mapping_rmap_item);
 	if (!err) {
+		pte_t orig_pte_tree_rmap_item = __pte(0);
+		void *save_mapping_tree_rmap_item;
+		
 		err = try_to_merge_with_ksm_page(tree_rmap_item,
-							tree_page, page);
+						 tree_page, page,
+						 &orig_pte_tree_rmap_item,
+						 &save_mapping_tree_rmap_item);
+
 		/*
 		 * If that fails, we have a ksm page with only one pte
 		 * pointing to it: so break it.
 		 */
-		if (err)
-			break_cow(rmap_item);
+		if (err) {
+			printk("Recover try_to_merge_two_pages\n");
+
+			pmd_t *pmd;
+			pmd_t pmde;
+			pte_t *ptep;
+			spinlock_t *ptl;
+
+			struct mm_struct *mm = rmap_item->mm;
+			mmap_read_lock(mm);
+
+			struct vm_area_struct *vma = find_mergeable_vma(mm, rmap_item->address);
+			if (!vma)
+				goto out;
+
+			pmd = mm_find_pmd(mm, rmap_item->address);
+			if (!pmd)
+				goto out;
+			/*
+			 * Some THP functions use the sequence pmdp_huge_clear_flush(), set_pmd_at()
+			 * without holding anon_vma lock for write.  So when looking for a
+			 * genuine pmde (in which to find pte), test present and !THP together.
+			 */
+			pmde = pmdp_get_lockless(pmd);
+			if (!pmd_present(pmde) || pmd_trans_huge(pmde))
+				goto out;
+
+			folio_lock(page_folio(page));
+
+			ptep = pte_offset_map_lock(mm, pmd, rmap_item->address, &ptl);
+			if (!ptep)
+				goto out_page_locked;
+			if (!pte_same(ptep_get(ptep), orig_pte_rmap_item)) {
+				pte_unmap_unlock(ptep, ptl);
+				goto out_page_locked;
+			}
+
+			mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0,
+						mm, rmap_item->address,
+						rmap_item->address + PAGE_SIZE);
+			mmu_notifier_invalidate_range_start(&range);
+
+			flush_cache_page(vma, rmap_item->address, pte_pfn(ptep_get(ptep)));
+			ptep_clear_flush(vma, rmap_item->address, ptep);
+			set_pte_at(mm, rmap_item->address,
+				   ptep, orig_pte_rmap_item);
+
+			mmu_notifier_invalidate_range_end(&range);
+			
+			page->mapping = save_mapping_rmap_item;
+			pte_unmap_unlock(ptep, ptl);
+		out_page_locked:
+			folio_unlock(page_folio(page));
+		out:
+			mmap_read_unlock(mm);
+		}
 	}
 	return err ? NULL : page_folio(page);
 }
@@ -2353,7 +2423,12 @@ static void cmp_and_merge_page(struct page *page, struct ksm_rmap_item *rmap_ite
 		if (kfolio == ERR_PTR(-EBUSY))
 			return;
 
-		err = try_to_merge_with_ksm_page(rmap_item, page, &kfolio->page);
+		pte_t orig_pte = __pte(0);
+		void *save_mapping;
+		err = try_to_merge_with_ksm_page(rmap_item, page,
+						 &kfolio->page,
+						 &orig_pte,
+						 &save_mapping);
 		if (!err) {
 			/*
 			 * The page was successfully merged:
