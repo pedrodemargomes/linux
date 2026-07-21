@@ -1709,6 +1709,14 @@ static struct folio *try_to_merge_two_pages(struct ksm_rmap_item *rmap_item,
 			mmu_notifier_invalidate_range_end(&range);
 
 			page->mapping = save_mapping_rmap_item;
+
+			struct folio *folio = page_folio(page);
+			if (folio && folio_test_anon(folio) && 
+			   (PageAnonExclusive(vmf->page) || wp_can_reuse_anon_folio(folio, vma))) {
+				if (!PageAnonExclusive(vmf->page))
+					SetPageAnonExclusive(vmf->page);
+
+
 			pte_unmap_unlock(ptep, ptl);
 		out_page_locked:
 			folio_unlock(page_folio(page));
