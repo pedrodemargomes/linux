@@ -1686,7 +1686,8 @@ static struct folio *try_to_merge_two_pages(struct ksm_rmap_item *rmap_item,
 			if (!pmd_present(pmde) || pmd_trans_huge(pmde))
 				goto out;
 
-			folio_lock(page_folio(page));
+			struct folio *folio = page_folio(page);
+			folio_lock(folio);
 
 			ptep = pte_offset_map_lock(mm, pmd, rmap_item->address, &ptl);
 			if (!ptep)
@@ -1708,18 +1709,17 @@ static struct folio *try_to_merge_two_pages(struct ksm_rmap_item *rmap_item,
 
 			mmu_notifier_invalidate_range_end(&range);
 
-			page->mapping = save_mapping_rmap_item;
+			folio->mapping = save_mapping_rmap_item;
 
-			struct folio *folio = page_folio(page);
-			if (folio && folio_test_anon(folio) && 
-			   (PageAnonExclusive(vmf->page) || wp_can_reuse_anon_folio(folio, vma))) {
-				if (!PageAnonExclusive(vmf->page))
-					SetPageAnonExclusive(vmf->page);
-
+			if (folio && folio_test_anon(folio) &&
+			   (PageAnonExclusive(page) || wp_can_reuse_anon_folio(folio, vma))) {
+				if (!PageAnonExclusive(page))
+					SetPageAnonExclusive(page);
+			}
 
 			pte_unmap_unlock(ptep, ptl);
 		out_page_locked:
-			folio_unlock(page_folio(page));
+			folio_unlock(folio);
 		out:
 			mmap_read_unlock(mm);
 		}
