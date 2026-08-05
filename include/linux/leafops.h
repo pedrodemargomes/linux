@@ -190,7 +190,7 @@ static inline enum softleaf_type softleaf_type(softleaf_t entry)
 	case SWP_HWPOISON:
 		return SOFTLEAF_HWPOISON;
 #endif
-	case SWP_PTE_MARKER:
+	case SWP_MARKER:
 		return SOFTLEAF_MARKER;
 	}
 
@@ -338,7 +338,7 @@ static inline pte_marker softleaf_to_marker(softleaf_t entry)
 {
 	VM_WARN_ON_ONCE(!softleaf_is_marker(entry));
 
-	return swp_offset(entry) & PTE_MARKER_MASK;
+	return swp_offset(entry) & MARKER_MASK;
 }
 
 /**
@@ -461,7 +461,7 @@ static inline bool softleaf_is_guard_marker(softleaf_t entry)
 	if (!softleaf_is_marker(entry))
 		return false;
 
-	return softleaf_to_marker(entry) & PTE_MARKER_GUARD;
+	return softleaf_to_marker(entry) & MARKER_GUARD;
 }
 
 /**

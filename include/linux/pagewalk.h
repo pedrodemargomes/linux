@@ -56,13 +56,16 @@ enum page_walk_lock {
  * @pre_vma:            if set, called before starting walk on a non-null vma.
  * @post_vma:           if set, called after a walk on a non-null vma, provided
  *                      that @pre_vma and the vma walk succeeded.
- * @install_pte:        if set, missing page table entries are installed and
+ * @install_pte:	if set, missing page table entries are installed and
  *                      thus all levels are always walked in the specified
  *                      range. This callback is then invoked at the PTE level
  *                      (having split any THP pages prior), providing the PTE to
  *                      install. If allocations fail, the walk is aborted. This
  *                      operation is only available for userland memory. Not
  *                      usable for hugetlb ranges.
+ * @install_pmd:	if set, missing pmds entries are installed by this
+ *			function.
+ *			return 1 to skip pmd and 0 to continue.
  *
  * p?d_entry callbacks are called even if those levels are folded on a
  * particular architecture/configuration.
@@ -90,6 +93,8 @@ struct mm_walk_ops {
 	void (*post_vma)(struct mm_walk *walk);
 	int (*install_pte)(unsigned long addr, unsigned long next,
 			   pte_t *ptep, struct mm_walk *walk);
+	int (*install_pmd)(unsigned long addr, unsigned long next,
+			   pmd_t *pmdp, struct mm_walk *walk);
 	enum page_walk_lock walk_lock;
 };
 

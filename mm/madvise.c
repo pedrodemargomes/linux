@@ -1058,6 +1058,13 @@ static bool is_valid_guard_vma(struct vm_area_struct *vma, bool allow_locked)
 	return !(vma->vm_flags & disallowed);
 }
 
+static bool is_guard_pmd_marker(pmd_t pmdval)
+{
+	const softleaf_t entry = softleaf_from_pmd(pmdval);
+
+	return softleaf_is_guard_marker(entry);
+}
+
 static bool is_guard_pte_marker(pte_t ptent)
 {
 	const softleaf_t entry = softleaf_from_pte(ptent);
@@ -1077,10 +1084,46 @@ static int guard_install_pud_entry(pud_t *pud, unsigned long addr,
 static int guard_install_pmd_entry(pmd_t *pmd, unsigned long addr,
 				   unsigned long next, struct mm_walk *walk)
 {
+	unsigned long *nr_pages;
 	pmd_t pmdval = pmdp_get(pmd);
 
-	/* If huge return >0 so we abort the operation + zap. */
-	return pmd_trans_huge(pmdval);
+	/* If populated return >0 so we abort the operation + zap. */
+	if (pmd_trans_huge(pmdval))
+		return 1;
+
+	nr_pages = (unsigned long *)walk->private;
+
+	/* If there is already a guard page marker, we have nothing to do. */
+	if (is_guard_pmd_marker(pmdval)) {
+		(*nr_pages) += PTRS_PER_PMD;
+
+		walk->action = ACTION_CONTINUE;
+		return 0;
+	}
+
+	return 0;
+}
+
+static int guard_install_set_pmd(unsigned long addr, unsigned long next,
+				 pmd_t *pmdp, struct mm_walk *walk)
+{
+	printk("guard_install_set_pmd\n");
+	int ret = 0;
+
+	if (IS_ALIGNED(addr, PMD_SIZE) && (next - addr) == PMD_SIZE) {
+		spinlock_t *ptl = pmd_lock(walk->mm, pmdp);
+		if (likely(pmd_none(*pmdp))) {
+			unsigned long *nr_pages = (unsigned long *)walk->private;
+
+			/* Simply install a PMD marker, this causes segfault on access. */
+			*pmdp = make_pmd_marker(MARKER_GUARD);
+			(*nr_pages) += PTRS_PER_PMD;
+			ret = 1;
+		}
+		spin_unlock(ptl);
+	}
+
+	return ret;
 }
 
 static int guard_install_pte_entry(pte_t *pte, unsigned long addr,
@@ -1106,7 +1149,7 @@ static int guard_install_set_pte(unsigned long addr, unsigned long next,
 	unsigned long *nr_pages = (unsigned long *)walk->private;
 
 	/* Simply install a PTE marker, this causes segfault on access. */
-	*ptep = make_pte_marker(PTE_MARKER_GUARD);
+	*ptep = make_pte_marker(MARKER_GUARD);
 	(*nr_pages)++;
 
 	return 0;
@@ -1120,6 +1163,7 @@ static long madvise_guard_install(struct madvise_behavior *madv_behavior)
 		.pud_entry	= guard_install_pud_entry,
 		.pmd_entry	= guard_install_pmd_entry,
 		.pte_entry	= guard_install_pte_entry,
+		.install_pmd	= guard_install_set_pmd,
 		.install_pte	= guard_install_set_pte,
 		.walk_lock	= get_walk_lock(madv_behavior->lock_mode),
 	};
@@ -1222,6 +1266,17 @@ static int guard_remove_pmd_entry(pmd_t *pmd, unsigned long addr,
 	/* If huge, cannot have guard pages present, so no-op - skip. */
 	if (pmd_trans_huge(pmdval))
 		walk->action = ACTION_CONTINUE;
+	else if (is_guard_pmd_marker(pmdval)) {
+		spinlock_t *ptl = pmd_lock(walk->mm, pmd);
+		pmdval = pmdp_get(pmd);
+		if (is_guard_pmd_marker(pmdval)) {
+			printk("Guard clear pdm\n");
+			/* Simply clear the PMD marker. */
+			pmd_clear(pmd);
+			update_mmu_cache_pmd(walk->vma, addr, pmd);
+		}
+		spin_unlock(ptl);
+	}
 
 	return 0;
 }

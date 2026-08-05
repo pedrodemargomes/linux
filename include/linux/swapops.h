@@ -107,6 +107,9 @@ static inline pgoff_t swp_offset(swp_entry_t entry)
 	return entry.val & SWP_OFFSET_MASK;
 }
 
+// Forward declaration
+static inline pmd_t swp_entry_to_pmd(swp_entry_t entry);
+
 /*
  * Convert the arch-independent representation of a swp_entry_t into the
  * arch-dependent pte representation.
@@ -292,16 +295,21 @@ typedef unsigned long pte_marker;
  */
 #define  PTE_MARKER_POISONED			BIT(1)
 /*
- * Indicates that, on fault, this PTE will case a SIGSEGV signal to be
+ * Indicates that, on fault, this PTE or PMD will case a SIGSEGV signal to be
  * sent. This means guard markers behave in effect as if the region were mapped
  * PROT_NONE, rather than if they were a memory hole or equivalent.
  */
-#define  PTE_MARKER_GUARD			BIT(2)
-#define  PTE_MARKER_MASK			(BIT(3) - 1)
+#define  MARKER_GUARD			BIT(2)
+#define  MARKER_MASK			(BIT(3) - 1)
 
 static inline swp_entry_t make_pte_marker_entry(pte_marker marker)
 {
-	return swp_entry(SWP_PTE_MARKER, marker);
+	return swp_entry(SWP_MARKER, marker);
+}
+
+static inline pmd_t make_pmd_marker(pte_marker marker)
+{
+	return swp_entry_to_pmd(make_pte_marker_entry(marker));
 }
 
 static inline pte_t make_pte_marker(pte_marker marker)
@@ -312,11 +320,6 @@ static inline pte_t make_pte_marker(pte_marker marker)
 static inline swp_entry_t make_poisoned_swp_entry(void)
 {
 	return make_pte_marker_entry(PTE_MARKER_POISONED);
-}
-
-static inline swp_entry_t make_guard_swp_entry(void)
-{
-	return make_pte_marker_entry(PTE_MARKER_GUARD);
 }
 
 struct page_vma_mapped_walk;

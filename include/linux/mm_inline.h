@@ -557,7 +557,7 @@ static inline pte_marker copy_pte_marker(
 {
 	const pte_marker srcm = softleaf_to_marker(entry);
 	/* Always copy error entries. */
-	pte_marker dstm = srcm & (PTE_MARKER_POISONED | PTE_MARKER_GUARD);
+	pte_marker dstm = srcm & (PTE_MARKER_POISONED | MARKER_GUARD);
 
 	/* Only copy PTE markers if UFFD register matches. */
 	if ((srcm & PTE_MARKER_UFFD_WP) && userfaultfd_wp(dst_vma))

@@ -2128,7 +2128,25 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	do {
 		next = pmd_addr_end(addr, end);
 		if (pmd_is_huge(*pmd)) {
-			if (next - addr != HPAGE_PMD_SIZE)
+			softleaf_t entry = softleaf_from_pmd(*pmd);
+			if (softleaf_is_guard_marker(entry)) {
+				/*
+				 * Ordinary zapping should not remove guard PMD
+				 * markers. Only do so if we should remove PMD
+				 * markers in general.
+				 */
+				if (!zap_drop_markers(details))
+					continue;
+
+				printk("zap_pmd_range clear guard marker in pmd\n");
+				// Drop PMD marker
+				spinlock_t *ptl = pmd_lock(tlb->mm, pmd);
+			
+				softleaf_t entry = softleaf_from_pmd(*pmd);
+				if (softleaf_is_guard_marker(entry))
+					pmd_clear(pmd);
+				spin_unlock(ptl);
+			} else if (next - addr != HPAGE_PMD_SIZE)
 				__split_huge_pmd(vma, pmd, addr, false);
 			else if (zap_huge_pmd(tlb, vma, pmd, addr)) {
 				addr = next;
@@ -4712,6 +4730,35 @@ static vm_fault_t pte_marker_handle_uffd_wp(struct vm_fault *vmf)
 	return do_pte_missing(vmf);
 }
 
+static vm_fault_t handle_pmd_marker(struct vm_fault *vmf)
+{
+	printk("handle_pmd_marker\n");
+	const softleaf_t entry = softleaf_from_pmd(vmf->orig_pmd);
+	const pte_marker marker = softleaf_to_marker(entry);
+
+	/*
+	 * PTE markers should never be empty.  If anything weird happened,
+	 * the best thing to do is to kill the process along with its mm.
+	 */
+	if (WARN_ON_ONCE(!marker))
+		return VM_FAULT_SIGBUS;
+
+	/* Higher priority than uffd-wp when data corrupted */
+	if (marker & PTE_MARKER_POISONED)
+		return VM_FAULT_HWPOISON;
+
+	/* Hitting a guard page is always a fatal condition. */
+	if (marker & MARKER_GUARD)
+		return VM_FAULT_SIGSEGV;
+
+	if (softleaf_is_uffd_wp_marker(entry))
+		return pte_marker_handle_uffd_wp(vmf);
+
+	/* This is an unknown pte marker */
+	return VM_FAULT_SIGBUS;
+}
+
+
 static vm_fault_t handle_pte_marker(struct vm_fault *vmf)
 {
 	const softleaf_t entry = softleaf_from_pte(vmf->orig_pte);
@@ -4729,7 +4776,7 @@ static vm_fault_t handle_pte_marker(struct vm_fault *vmf)
 		return VM_FAULT_HWPOISON;
 
 	/* Hitting a guard page is always a fatal condition. */
-	if (marker & PTE_MARKER_GUARD)
+	if (marker & MARKER_GUARD)
 		return VM_FAULT_SIGSEGV;
 
 	if (softleaf_is_uffd_wp_marker(entry))
@@ -6670,13 +6717,19 @@ retry_pud:
 	vmf.orig_pmd = pmdp_get_lockless(vmf.pmd);
 	if (pmd_none(vmf.orig_pmd))
 		goto fallback;
+	
 
 	if (unlikely(!pmd_present(vmf.orig_pmd))) {
 		if (pmd_is_device_private_entry(vmf.orig_pmd))
 			return do_huge_pmd_device_private(&vmf);
+		
+		softleaf_t entry = softleaf_from_pmd(vmf.orig_pmd);
+		if (softleaf_is_marker(entry))
+			return handle_pmd_marker(&vmf);
 
 		if (pmd_is_migration_entry(vmf.orig_pmd))
 			pmd_migration_entry_wait(mm, vmf.pmd);
+		
 		return 0;
 	}
 	if (pmd_trans_huge(vmf.orig_pmd)) {

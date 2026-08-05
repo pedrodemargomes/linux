@@ -101,7 +101,8 @@ static int walk_pmd_range(pud_t *pud, unsigned long addr, unsigned long end,
 	unsigned long next;
 	const struct mm_walk_ops *ops = walk->ops;
 	bool has_handler = ops->pte_entry;
-	bool has_install = ops->install_pte;
+	bool has_install_pte = ops->install_pte;
+	bool has_install_pmd = ops->install_pmd;
 	int err = 0;
 	int depth = real_depth(3);
 
@@ -128,13 +129,17 @@ static int walk_pmd_range(pud_t *pud, unsigned long addr, unsigned long end,
 again:
 		next = pmd_addr_end(addr, end);
 		if (pmd_none(*pmd)) {
-			if (has_install)
+			if (has_install_pmd) {
+				if (ops->install_pmd(addr, next, pmd, walk))
+					continue;
+			}
+			if (has_install_pte)
 				err = __pte_alloc(walk->mm, pmd);
 			else if (ops->pte_hole)
 				err = ops->pte_hole(addr, next, depth, walk);
 			if (err)
 				break;
-			if (!has_install)
+			if (!has_install_pte)
 				continue;
 		}
 
@@ -155,7 +160,7 @@ again:
 			continue;
 
 		if (!has_handler) { /* No handlers for lower page tables. */
-			if (!has_install)
+			if (!has_install_pte)
 				continue; /* Nothing to do. */
 			/*
 			 * We are ONLY installing, so avoid unnecessarily
@@ -189,7 +194,7 @@ static int walk_pud_range(p4d_t *p4d, unsigned long addr, unsigned long end,
 	unsigned long next;
 	const struct mm_walk_ops *ops = walk->ops;
 	bool has_handler = ops->pmd_entry || ops->pte_entry;
-	bool has_install = ops->install_pte;
+	bool has_install = ops->install_pte || ops->install_pmd;
 	int err = 0;
 	int depth = real_depth(2);
 
@@ -254,7 +259,7 @@ static int walk_p4d_range(pgd_t *pgd, unsigned long addr, unsigned long end,
 	unsigned long next;
 	const struct mm_walk_ops *ops = walk->ops;
 	bool has_handler = ops->pud_entry || ops->pmd_entry || ops->pte_entry;
-	bool has_install = ops->install_pte;
+	bool has_install = ops->install_pte || ops->install_pmd;
 	int err = 0;
 	int depth = real_depth(1);
 
@@ -293,7 +298,7 @@ static int walk_pgd_range(unsigned long addr, unsigned long end,
 	const struct mm_walk_ops *ops = walk->ops;
 	bool has_handler = ops->p4d_entry || ops->pud_entry || ops->pmd_entry ||
 		ops->pte_entry;
-	bool has_install = ops->install_pte;
+	bool has_install = ops->install_pte || ops->install_pmd;
 	int err = 0;
 
 	if (walk->pgd)
