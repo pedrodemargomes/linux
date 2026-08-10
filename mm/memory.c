@@ -2128,8 +2128,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	do {
 		next = pmd_addr_end(addr, end);
 		if (pmd_is_huge(*pmd)) {
-			softleaf_t entry = softleaf_from_pmd(*pmd);
-			if (softleaf_is_guard_marker(entry)) {
+			if (next - addr != HPAGE_PMD_SIZE)
+				__split_huge_pmd(vma, pmd, addr, false);
+			else if (pmd_is_guard_marker_entry(*pmd)) {
 				/*
 				 * Ordinary zapping should not remove guard PMD
 				 * markers. Only do so if we should remove PMD
@@ -2139,16 +2140,13 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 					continue;
 
 				printk("zap_pmd_range clear guard marker in pmd\n");
-				// Drop PMD marker
+
 				spinlock_t *ptl = pmd_lock(tlb->mm, pmd);
-			
 				softleaf_t entry = softleaf_from_pmd(*pmd);
 				if (softleaf_is_guard_marker(entry))
 					pmd_clear(pmd);
 				spin_unlock(ptl);
-			} else if (next - addr != HPAGE_PMD_SIZE)
-				__split_huge_pmd(vma, pmd, addr, false);
-			else if (zap_huge_pmd(tlb, vma, pmd, addr)) {
+			} else if (zap_huge_pmd(tlb, vma, pmd, addr)) {
 				addr = next;
 				continue;
 			}

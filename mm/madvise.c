@@ -1107,12 +1107,12 @@ static int guard_install_pmd_entry(pmd_t *pmd, unsigned long addr,
 static int guard_install_set_pmd(unsigned long addr, unsigned long next,
 				 pmd_t *pmdp, struct mm_walk *walk)
 {
-	printk("guard_install_set_pmd\n");
 	int ret = 0;
 
 	if (IS_ALIGNED(addr, PMD_SIZE) && (next - addr) == PMD_SIZE) {
 		spinlock_t *ptl = pmd_lock(walk->mm, pmdp);
 		if (likely(pmd_none(*pmdp))) {
+			printk("guard_install_set_pmd\n");
 			unsigned long *nr_pages = (unsigned long *)walk->private;
 
 			/* Simply install a PMD marker, this causes segfault on access. */
@@ -1266,7 +1266,8 @@ static int guard_remove_pmd_entry(pmd_t *pmd, unsigned long addr,
 	/* If huge, cannot have guard pages present, so no-op - skip. */
 	if (pmd_trans_huge(pmdval))
 		walk->action = ACTION_CONTINUE;
-	else if (is_guard_pmd_marker(pmdval)) {
+	else if (IS_ALIGNED(addr, PMD_SIZE) && (next - addr) == PMD_SIZE &&
+		 is_guard_pmd_marker(pmdval)) {
 		spinlock_t *ptl = pmd_lock(walk->mm, pmd);
 		pmdval = pmdp_get(pmd);
 		if (is_guard_pmd_marker(pmdval)) {
@@ -1274,6 +1275,7 @@ static int guard_remove_pmd_entry(pmd_t *pmd, unsigned long addr,
 			/* Simply clear the PMD marker. */
 			pmd_clear(pmd);
 			update_mmu_cache_pmd(walk->vma, addr, pmd);
+			walk->action = ACTION_CONTINUE;
 		}
 		spin_unlock(ptl);
 	}

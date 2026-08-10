@@ -616,6 +616,18 @@ static inline bool pmd_is_device_private_entry(pmd_t pmd)
 #endif /* CONFIG_ZONE_DEVICE && CONFIG_ARCH_HAS_PMD_SOFTLEAVES */
 
 /**
+ * pmd_is_guard_marker_entry() - Does this PMD entry encode a guard marker
+ * entry?
+ * @pmd: PMD entry.
+ *
+ * Returns: true if the PMD encodes a guard marker entry, otherwise false.
+ */
+static inline bool pmd_is_guard_marker_entry(pmd_t pmd)
+{
+	return softleaf_is_guard_marker(softleaf_from_pmd(pmd));
+}
+
+/**
  * pmd_is_migration_entry() - Does this PMD entry encode a migration entry?
  * @pmd: PMD entry.
  *
@@ -636,7 +648,8 @@ static inline bool softleaf_is_valid_pmd_entry(softleaf_t entry)
 {
 	/* Only device private, migration entries valid for PMD. */
 	return softleaf_is_device_private(entry) ||
-		softleaf_is_migration(entry);
+		softleaf_is_migration(entry) ||
+		softleaf_is_guard_marker(entry);
 }
 
 /**
