@@ -32,6 +32,7 @@
 #include <linux/leafops.h>
 #include <linux/shmem_fs.h>
 #include <linux/mmu_notifier.h>
+#include <linux/pgalloc.h>
 
 #include <asm/tlb.h>
 
@@ -1266,18 +1267,30 @@ static int guard_remove_pmd_entry(pmd_t *pmd, unsigned long addr,
 	/* If huge, cannot have guard pages present, so no-op - skip. */
 	if (pmd_trans_huge(pmdval))
 		walk->action = ACTION_CONTINUE;
-	else if (IS_ALIGNED(addr, PMD_SIZE) && (next - addr) == PMD_SIZE &&
-		 is_guard_pmd_marker(pmdval)) {
-		spinlock_t *ptl = pmd_lock(walk->mm, pmd);
-		pmdval = pmdp_get(pmd);
-		if (is_guard_pmd_marker(pmdval)) {
-			printk("Guard clear pdm\n");
-			/* Simply clear the PMD marker. */
-			pmd_clear(pmd);
-			update_mmu_cache_pmd(walk->vma, addr, pmd);
-			walk->action = ACTION_CONTINUE;
+	else if (is_guard_pmd_marker(pmdval)) {
+		if (IS_ALIGNED(addr, PMD_SIZE) && (next - addr) == PMD_SIZE) {
+			spinlock_t *ptl = pmd_lock(walk->mm, pmd);
+			pmdval = pmdp_get(pmd);
+			if (is_guard_pmd_marker(pmdval)) {
+				printk("Guard clear pmd\n");
+				/* Simply clear the PMD marker. */
+				pmd_clear(pmd);
+				update_mmu_cache_pmd(walk->vma, addr, pmd);
+				walk->action = ACTION_CONTINUE;
+			}
+			spin_unlock(ptl);
+		} else {
+			pgtable_t pgtable = pte_alloc_one(walk->mm);
+			if (!pgtable)
+				return 1;
+			spinlock_t *ptl = pmd_lock(walk->mm, pmd);
+			if (is_guard_pmd_marker(pmdval)) {
+				printk("deposit pgtable in pmd to be splitted\n");
+				pgtable_trans_huge_deposit(walk->mm, pmd, pgtable);
+				mm_inc_nr_ptes(walk->mm);
+			}
+			spin_unlock(ptl);
 		}
-		spin_unlock(ptl);
 	}
 
 	return 0;
@@ -1289,6 +1302,7 @@ static int guard_remove_pte_entry(pte_t *pte, unsigned long addr,
 	pte_t ptent = ptep_get(pte);
 
 	if (is_guard_pte_marker(ptent)) {
+		printk("clear pte guard marker\n");
 		/* Simply clear the PTE marker. */
 		pte_clear(walk->mm, addr, pte);
 		update_mmu_cache(walk->vma, addr, pte);

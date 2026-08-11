@@ -3160,6 +3160,30 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 	count_vm_event(THP_SPLIT_PMD);
 
+	if (pmd_is_guard_marker_entry(*pmd)) {
+		pgtable = pgtable_trans_huge_withdraw(mm, pmd);
+
+		/* Do not allocate a pgtable here to lock order inversion
+		pgtable_t pgtable = pte_alloc_one(mm);
+		if (!pgtable)
+			return;
+		*/
+
+		pmd_populate(mm, &_pmd, pgtable);
+		
+		pte = pte_offset_map(&_pmd, haddr);
+		VM_BUG_ON(!pte);
+
+		pte_t entry = make_pte_marker(MARKER_GUARD);
+		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_NR);
+		pte_unmap(pte);
+
+		smp_wmb(); /* make pte visible before pmd */
+		pmd_populate(mm, pmd, pgtable);
+
+		return;
+	}
+
 	if (!vma_is_anonymous(vma)) {
 		old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
 		/*

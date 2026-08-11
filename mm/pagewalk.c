@@ -171,8 +171,9 @@ again:
 		}
 
 		if (walk->vma) {
-			printk("split_huge_pmd\n");
+			printk("start split_huge_pmd\n");
 			split_huge_pmd(walk->vma, pmd, addr);
+			printk("end split_huge_pmd\n");
 		} else if (pmd_leaf(*pmd) || !pmd_present(*pmd))
 			continue; /* Nothing to do. */
 
