@@ -1284,6 +1284,7 @@ static int guard_remove_pmd_entry(pmd_t *pmd, unsigned long addr,
 			if (!pgtable)
 				return 1;
 			spinlock_t *ptl = pmd_lock(walk->mm, pmd);
+			pmdval = pmdp_get(pmd);
 			if (is_guard_pmd_marker(pmdval)) {
 				printk("deposit pgtable in pmd to be splitted\n");
 				pgtable_trans_huge_deposit(walk->mm, pmd, pgtable);
