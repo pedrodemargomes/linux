@@ -40,6 +40,7 @@ enum scan_result {
 	SCAN_EXCEED_SHARED_PTE,
 	SCAN_PTE_NON_PRESENT,
 	SCAN_PTE_UFFD,
+	SCAN_PTE_GUARD,
 	SCAN_PTE_MAPPED_HUGEPAGE,
 	SCAN_LACK_REFERENCED_PAGE,
 	SCAN_PAGE_NULL,
@@ -764,6 +765,11 @@ static enum pte_check_result collapse_check_pte(pte_t pteval,
 		}
 		if (pte_swp_uffd_any(pteval))
 			return pte_check_fail(ctx, SCAN_PTE_UFFD);
+		if (pte_is_guard_marker(pteval)) {
+			printk("PTE IS GUARD MARKER KHUGEPAGED\n");
+			result = SCAN_PTE_GUARD;
+			return pte_check_fail(ctx, SCAN_PTE_GUARD);
+		}
 		return PTE_CHECK_CONTINUE;
 	}
 	/*
@@ -1642,6 +1648,7 @@ static enum scan_result mthp_collapse(struct mm_struct *mm,
 			case SCAN_DEL_PAGE_LRU:
 			case SCAN_PTE_NON_PRESENT:
 			case SCAN_PTE_UFFD:
+			case SCAN_PTE_GUARD:
 			case SCAN_PAGE_LAZYFREE:
 				last_result = ret;
 				goto next_order;
@@ -3267,6 +3274,7 @@ int madvise_collapse(struct vm_area_struct *vma, unsigned long start,
 		case SCAN_NO_PTE_TABLE:
 		case SCAN_PTE_NON_PRESENT:
 		case SCAN_PTE_UFFD:
+		case SCAN_PTE_GUARD:
 		case SCAN_LACK_REFERENCED_PAGE:
 		case SCAN_PAGE_NULL:
 		case SCAN_PAGE_COUNT:

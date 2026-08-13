@@ -587,6 +587,11 @@ static inline bool pte_is_uffd_marker(pte_t pte)
 	return false;
 }
 
+static inline bool pte_is_guard_marker(pte_t pte)
+{
+	return softleaf_is_guard_marker(softleaf_from_pte(pte));
+}
+
 #if defined(CONFIG_ZONE_DEVICE) && defined(CONFIG_ARCH_HAS_PMD_SOFTLEAVES)
 
 /**
