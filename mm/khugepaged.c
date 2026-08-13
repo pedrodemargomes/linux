@@ -767,7 +767,6 @@ static enum pte_check_result collapse_check_pte(pte_t pteval,
 			return pte_check_fail(ctx, SCAN_PTE_UFFD);
 		if (pte_is_guard_marker(pteval)) {
 			printk("PTE IS GUARD MARKER KHUGEPAGED\n");
-			result = SCAN_PTE_GUARD;
 			return pte_check_fail(ctx, SCAN_PTE_GUARD);
 		}
 		return PTE_CHECK_CONTINUE;
