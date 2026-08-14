@@ -548,6 +548,19 @@ static inline bool pte_is_marker(pte_t pte)
 }
 
 /**
+ * pte_is_guard_marker() - Does the PTE entry encode a guard marker leaf entry?
+ * @pte: PTE entry.
+ *
+ * Returns: true if this PTE is a guard marker leaf entry, otherwise false.
+ */
+static inline bool pte_is_guard_marker(pte_t pte)
+{
+	const softleaf_t entry = softleaf_from_pte(pte);
+
+	return softleaf_is_guard_marker(entry);
+}
+
+/**
  * pte_is_uffd_wp_marker() - Does this PTE entry encode a userfaultfd write
  * protect marker leaf entry?
  * @pte: PTE entry.
@@ -585,11 +598,6 @@ static inline bool pte_is_uffd_marker(pte_t pte)
 		return true;
 
 	return false;
-}
-
-static inline bool pte_is_guard_marker(pte_t pte)
-{
-	return softleaf_is_guard_marker(softleaf_from_pte(pte));
 }
 
 #if defined(CONFIG_ZONE_DEVICE) && defined(CONFIG_ARCH_HAS_PMD_SOFTLEAVES)

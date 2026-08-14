@@ -1059,13 +1059,6 @@ static bool is_valid_guard_vma(struct vm_area_struct *vma, bool allow_locked)
 	return !(vma->vm_flags & disallowed);
 }
 
-static bool is_guard_pte_marker(pte_t ptent)
-{
-	const softleaf_t entry = softleaf_from_pte(ptent);
-
-	return softleaf_is_guard_marker(entry);
-}
-
 static int guard_install_pud_entry(pud_t *pud, unsigned long addr,
 				   unsigned long next, struct mm_walk *walk)
 {
@@ -1091,7 +1084,7 @@ static int guard_install_pte_entry(pte_t *pte, unsigned long addr,
 	unsigned long *nr_pages = (unsigned long *)walk->private;
 
 	/* If there is already a guard page marker, we have nothing to do. */
-	if (is_guard_pte_marker(pteval)) {
+	if (pte_is_guard_marker(pteval)) {
 		(*nr_pages)++;
 
 		return 0;
@@ -1232,7 +1225,7 @@ static int guard_remove_pte_entry(pte_t *pte, unsigned long addr,
 {
 	pte_t ptent = ptep_get(pte);
 
-	if (is_guard_pte_marker(ptent)) {
+	if (pte_is_guard_marker(ptent)) {
 		/* Simply clear the PTE marker. */
 		pte_clear(walk->mm, addr, pte);
 		update_mmu_cache(walk->vma, addr, pte);
