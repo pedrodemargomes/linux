@@ -1863,6 +1863,7 @@ static enum scan_result set_huge_pmd(struct vm_area_struct *vma, unsigned long a
 static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsigned long addr,
 		bool install_pmd)
 {
+	printk("try_collapse_pte_mapped_thp addr: %lx install_pmd %d\n", addr, install_pmd);
 	enum scan_result result = SCAN_FAIL;
 	int nr_mapped_ptes = 0;
 	unsigned int nr_batch_ptes;
@@ -1886,8 +1887,10 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 
 	/* Fast check before locking page if already PMD-mapped */
 	result = find_pmd_or_thp_or_none(mm, haddr, &pmd);
-	if (result == SCAN_PMD_MAPPED)
+	if (result == SCAN_PMD_MAPPED) {
+		printk("PMD MAPPED addr: %lx\n", haddr);
 		return result;
+	}
 
 	/*
 	 * If we are here, we've succeeded in replacing all the native pages
@@ -1925,6 +1928,7 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 		 * All pte entries have been removed and pmd cleared.
 		 * Skip all the pte checks and just update the pmd mapping.
 		 */
+		printk("SCAN_NO_PTE_TABLE\n");
 		goto maybe_install_pmd;
 	default:
 		goto drop_folio;
@@ -2705,6 +2709,7 @@ static enum scan_result collapse_scan_file(struct mm_struct *mm,
 			continue;
 
 		if (xa_is_value(folio)) {
+			printk("xas_get_order(&xas): %d\n", xas_get_order(&xas));
 			swap += 1 << xas_get_order(&xas);
 			if (swap > max_ptes_swap) {
 				result = SCAN_EXCEED_SWAP_PTE;
@@ -2726,6 +2731,7 @@ static enum scan_result collapse_scan_file(struct mm_struct *mm,
 		}
 
 		if (is_pmd_order(folio_order(folio))) {
+			printk("is_pmd_order(folio_order(folio) start: %lx pfn: %ld\n", start, folio_pfn(folio));
 			result = SCAN_PTE_MAPPED_HUGEPAGE;
 			/*
 			 * PMD-sized THP implies that we can only try
