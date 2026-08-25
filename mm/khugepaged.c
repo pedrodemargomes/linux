@@ -1939,6 +1939,8 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 	if (!start_pte)		/* mmap_lock + page lock should prevent this */
 		goto drop_folio;
 
+	printk("folio_pfn(folio): %lx folio_order: %d\n", folio_pfn(folio), folio_order(folio));
+
 	/* step 1: check all mapped PTEs are to the right huge page */
 	for (i = 0, addr = haddr, pte = start_pte;
 	     i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE, pte++) {
@@ -1962,8 +1964,10 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 		 * Note that uprobe, debugger, or MAP_PRIVATE may change the
 		 * page table, but the new page will not be a subpage of hpage.
 		 */
-		if (folio_page(folio, i) != page)
+		if (folio_page(folio, i) != page) {
+			printk("folio_page(folio, i) != page\ni: %d folio_page(folio, i): %lx page: %lx\n", i, page_to_pfn(folio_page(folio, i)), page_to_pfn(page));
 			goto abort;
+		}
 	}
 
 	pte_unmap_unlock(start_pte, ptl);
@@ -2731,7 +2735,7 @@ static enum scan_result collapse_scan_file(struct mm_struct *mm,
 		}
 
 		if (is_pmd_order(folio_order(folio))) {
-			printk("is_pmd_order(folio_order(folio) start: %lx pfn: %ld\n", start, folio_pfn(folio));
+			printk("is_pmd_order(folio_order(folio)) start: %lx pfn: %lx\n", start, folio_pfn(folio));
 			result = SCAN_PTE_MAPPED_HUGEPAGE;
 			/*
 			 * PMD-sized THP implies that we can only try
