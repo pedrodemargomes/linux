@@ -117,6 +117,9 @@ struct collapse_control {
 
 	/* Each bit represents a single occupied (!none/zero) page. */
 	DECLARE_BITMAP(mthp_present_ptes, MAX_PTRS_PER_PTE);
+
+	/* Each bit represents a single not present and not none/zero pte. */
+	DECLARE_BITMAP(mthp_unmapped_ptes, MAX_PTRS_PER_PTE);
 };
 
 /**
@@ -634,6 +637,7 @@ static void collapse_control_init_scan(struct collapse_control *cc)
 	memset(cc->node_load, 0, sizeof(cc->node_load));
 	nodes_clear(cc->alloc_nmask);
 	bitmap_zero(cc->mthp_present_ptes, MAX_PTRS_PER_PTE);
+	bitmap_zero(cc->mthp_unmapped_ptes, MAX_PTRS_PER_PTE);
 }
 
 static void release_pte_folio(struct folio *folio)
@@ -1297,7 +1301,7 @@ static enum scan_result alloc_charge_folio(struct folio **foliop, struct mm_stru
  * Note that the VMA must be rechecked after grabbing the mmap_lock again.
  */
 static enum scan_result collapse_huge_page(struct mm_struct *mm, unsigned long start_addr,
-		int referenced, int unmapped, struct collapse_control *cc,
+		int referenced, bool swapin, struct collapse_control *cc,
 		unsigned int order)
 {
 	const unsigned long pmd_addr = start_addr & HPAGE_PMD_MASK;
@@ -1336,7 +1340,7 @@ static enum scan_result collapse_huge_page(struct mm_struct *mm, unsigned long s
 		goto out_nolock;
 	}
 
-	if (unmapped) {
+	if (swapin) {
 		/*
 		 * __collapse_huge_page_swapin() will return with mmap_lock
 		 * released when it fails. So we jump out_nolock directly in
@@ -1508,10 +1512,11 @@ static unsigned int max_order_from_offset(unsigned int offset)
  * mTHP.
  */
 static enum scan_result mthp_collapse(struct mm_struct *mm,
-		unsigned long address, int referenced, int unmapped,
+		unsigned long address, int referenced,
 		struct collapse_control *cc, unsigned long enabled_orders)
 {
-	unsigned int nr_occupied_ptes, nr_ptes, max_ptes_none;
+	unsigned int nr_occupied_ptes, nr_unmapped_ptes, nr_ptes, max_ptes_none;
+	unsigned int max_ptes_swap;
 	enum scan_result last_result = SCAN_FAIL;
 	int collapsed = 0;
 	bool alloc_failed = false;
@@ -1525,24 +1530,31 @@ static enum scan_result mthp_collapse(struct mm_struct *mm,
 		if (!test_bit(order, &enabled_orders))
 			goto next_order;
 
+		max_ptes_swap = collapse_max_ptes_swap(cc, order);
 		max_ptes_none = collapse_max_ptes_none(cc, NULL, order);
 		nr_occupied_ptes = bitmap_weight_from(cc->mthp_present_ptes, offset,
 						      offset + nr_ptes);
+		nr_unmapped_ptes = bitmap_weight_from(cc->mthp_unmapped_ptes, offset,
+						      offset + nr_ptes);
+
+		if (nr_unmapped_ptes > max_ptes_swap)
+			goto next_order;
 
 		/*
-		 * Swap PTEs accepted during the scan are counted in @unmapped,
-		 * not in the present-PTE bitmap. Account them for the PMD-order
-		 * candidate.
+		 * Swap PTEs accepted during the scan are counted in
+		 * nr_unmapped_ptes, not in the present-PTE bitmap. Account
+		 * them for the PMD-order candidate.
 		 */
 		if (is_pmd_order(order))
-			nr_occupied_ptes += unmapped;
+			nr_occupied_ptes += nr_unmapped_ptes;
 
 		if (nr_occupied_ptes >= nr_ptes - max_ptes_none) {
 			enum scan_result ret;
+			bool swapin = nr_unmapped_ptes > 0;
 
 			collapse_address = address + offset * PAGE_SIZE;
 			ret = collapse_huge_page(mm, collapse_address, referenced,
-						 unmapped, cc, order);
+						 swapin, cc, order);
 
 			switch (ret) {
 			/* Cases where we continue to next collapse candidate */
@@ -1642,12 +1654,15 @@ static enum scan_result collapse_scan_pmd(struct mm_struct *mm,
 	enabled_orders = collapse_possible_orders(vma, vma->vm_flags, tva_flags);
 
 	/*
-	 * If PMD is the only enabled order, enforce max_ptes_none, otherwise
-	 * scan all pages to populate the bitmap for mTHP collapse. The bitmap
-	 * is then checked again in mthp_collapse() for each attempted order.
+	 * If PMD is the only enabled order, enforce max_ptes_none and
+	 * max_ptes_swap, otherwise scan all pages to populate the bitmap for
+	 * mTHP collapse. The bitmap is then checked again in mthp_collapse()
+	 * for each attempted order.
 	 */
-	if (enabled_orders != BIT(HPAGE_PMD_ORDER))
+	if (enabled_orders != BIT(HPAGE_PMD_ORDER)) {
 		max_ptes_none = KHUGEPAGED_MAX_PTES_LIMIT;
+		max_ptes_swap = KHUGEPAGED_MAX_PTES_LIMIT;
+	}
 
 	pte = pte_offset_map_lock(mm, pmd, start_addr, &ptl);
 	if (!pte) {
@@ -1673,6 +1688,7 @@ static enum scan_result collapse_scan_pmd(struct mm_struct *mm,
 			continue;
 		}
 		if (!pte_present(pteval)) {
+			__set_bit(i, cc->mthp_unmapped_ptes);
 			if (++unmapped > max_ptes_swap) {
 				result = SCAN_EXCEED_SWAP_PTE;
 				count_collapse_event(HPAGE_PMD_ORDER, THP_SCAN_EXCEED_SWAP_PTE,
@@ -1791,7 +1807,7 @@ out_unmap:
 		/* collapse_huge_page() expects the lock to be dropped before calling */
 		mmap_read_unlock(mm);
 		result = mthp_collapse(mm, start_addr, referenced,
-				       unmapped, cc, enabled_orders);
+				       cc, enabled_orders);
 		/* mmap_lock was released above, set lock_dropped */
 		*lock_dropped = true;
 	}
