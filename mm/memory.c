@@ -1970,6 +1970,15 @@ static inline int do_zap_pte_range(struct mmu_gather *tlb,
 	return nr;
 }
 
+static bool pmd_table_reclaim_possible(unsigned long start, unsigned long end,
+		struct zap_details *details)
+{
+	if (!IS_ENABLED(CONFIG_PT_RECLAIM))
+		return false;
+	/* Only zap if we are allowed to and cover the full page table. */
+	return details && details->reclaim_pt && (end - start >= PUD_SIZE);
+}
+
 static bool pte_table_reclaim_possible(unsigned long start, unsigned long end,
 		struct zap_details *details)
 {
@@ -1979,6 +1988,20 @@ static bool pte_table_reclaim_possible(unsigned long start, unsigned long end,
 	return details && details->reclaim_pt && (end - start >= PMD_SIZE);
 }
 
+static bool zap_empty_pmd_table(struct mm_struct *mm, pud_t *pud,
+		pud_t *pudval)
+{
+	spinlock_t *pml = pud_lockptr(mm, pud);
+
+	if (!spin_trylock(pml))
+		return false;
+
+	*pudval = pudp_get(pud);
+	pud_clear(pud);
+	
+	spin_unlock(pml);
+	return true;
+}
 static bool zap_empty_pte_table(struct mm_struct *mm, pmd_t *pmd,
 		spinlock_t *ptl, pmd_t *pmdval)
 {
@@ -1992,6 +2015,34 @@ static bool zap_empty_pte_table(struct mm_struct *mm, pmd_t *pmd,
 	if (ptl != pml)
 		spin_unlock(pml);
 	return true;
+}
+
+static bool zap_pmd_table_if_empty(struct mm_struct *mm, pud_t *pud,
+		unsigned long addr, pud_t *pudval)
+{
+	spinlock_t *pml;
+	pmd_t *start_pmd, *pmd;
+	int i;
+
+	pml = pud_lock(mm, pud);
+	start_pmd = pmd_offset(pud, addr);
+	if (!start_pmd)
+		goto out_ptl;
+
+	for (i = 0, pmd = start_pmd; i < PTRS_PER_PMD; i++, pmd++) {
+		if (!pmd_none(pmdp_get(pmd)))
+			goto out_ptl;
+	}
+	*pudval = pudp_get(pud);
+	pud_clear(pud);
+
+	spin_unlock(pml);
+	return true;
+out_ptl:
+	//if (start_pmd)
+	//	pte_unmap_unlock(start_pte, ptl);
+	spin_unlock(pml);
+	return false;
 }
 
 static bool zap_pte_table_if_empty(struct mm_struct *mm, pmd_t *pmd,
@@ -2031,6 +2082,7 @@ out_ptl:
 static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long addr, unsigned long end,
+				bool *direct_reclaim,
 				struct zap_details *details)
 {
 	bool can_reclaim_pt = pte_table_reclaim_possible(addr, end, details);
@@ -2042,7 +2094,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	pte_t *pte;
 	pmd_t pmdval;
 	unsigned long start = addr;
-	bool direct_reclaim = true;
+	*direct_reclaim = true;
 	int nr;
 
 retry:
@@ -2058,7 +2110,7 @@ retry:
 		bool any_skipped = false;
 
 		if (need_resched()) {
-			direct_reclaim = false;
+			*direct_reclaim = false;
 			break;
 		}
 
@@ -2068,7 +2120,7 @@ retry:
 			can_reclaim_pt = false;
 		if (unlikely(force_break)) {
 			addr += nr * PAGE_SIZE;
-			direct_reclaim = false;
+			*direct_reclaim = false;
 			break;
 		}
 	} while (pte += nr, addr += PAGE_SIZE * nr, addr != end);
@@ -2081,8 +2133,8 @@ retry:
 	 * to ensure they are still none, thereby preventing the pte entries
 	 * from being repopulated by another thread.
 	 */
-	if (can_reclaim_pt && direct_reclaim && addr == end)
-		direct_reclaim = zap_empty_pte_table(mm, pmd, ptl, &pmdval);
+	if (can_reclaim_pt && *direct_reclaim && addr == end)
+		*direct_reclaim = zap_empty_pte_table(mm, pmd, ptl, &pmdval);
 
 	add_mm_rss_vec(mm, rss);
 	lazy_mmu_mode_disable();
@@ -2111,7 +2163,7 @@ retry:
 	}
 
 	if (can_reclaim_pt) {
-		if (direct_reclaim || zap_pte_table_if_empty(mm, pmd, start, &pmdval)) {
+		if (*direct_reclaim || zap_pte_table_if_empty(mm, pmd, start, &pmdval)) {
 			pte_free_tlb(tlb, pmd_pgtable(pmdval), addr);
 			mm_dec_nr_ptes(mm);
 		}
@@ -2127,6 +2179,12 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 {
 	pmd_t *pmd;
 	unsigned long next;
+	pud_t pudval;
+	struct mm_struct *mm = tlb->mm;
+	unsigned long start = addr;
+	bool pte_direct_reclaim;
+	bool pmd_direct_reclaim = true;
+	bool can_reclaim_pmd = pmd_table_reclaim_possible(addr, end, details);
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -2148,10 +2206,23 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			addr = next;
 			continue;
 		}
-		addr = zap_pte_range(tlb, vma, pmd, addr, next, details);
+		addr = zap_pte_range(tlb, vma, pmd, addr, next,
+			&pte_direct_reclaim, details);
+		if (!pte_direct_reclaim)
+			pmd_direct_reclaim = false;
 		if (addr != next)
 			pmd--;
 	} while (pmd++, cond_resched(), addr != end);
+
+	if (can_reclaim_pmd) {
+		if (pmd_direct_reclaim)
+			pmd_direct_reclaim = zap_empty_pmd_table(mm, pud, &pudval);
+			
+		if (pmd_direct_reclaim || zap_pmd_table_if_empty(mm, pud, start, &pudval)) {
+			pmd_free_tlb(tlb, pud_pgtable(pudval), addr);
+			mm_dec_nr_pmds(mm);
+		}
+	}
 
 	return addr;
 }
