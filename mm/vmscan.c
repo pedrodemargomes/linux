@@ -3682,6 +3682,7 @@ static void walk_update_folio(struct lru_gen_mm_walk *walk, struct vm_area_struc
 static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 			   struct mm_walk *args)
 {
+	printk("walk_pte_range\n");
 	int i;
 	bool dirty;
 	pte_t *pte;
@@ -3761,6 +3762,20 @@ restart:
 
 	if (i < PTRS_PER_PTE && get_next_vma(PMD_MASK, PAGE_SIZE, args, &start, &end))
 		goto restart;
+
+	if (i == PTRS_PER_PTE && young == PTRS_PER_PTE) {
+		int none = 0;
+		int zero_page = 0;
+		for (int j = 0; j < PTRS_PER_PTE; ++j) {
+			pte_t *cur_pte = pte + j;
+			pte_t ptent = ptep_get(cur_pte);
+			if (pte_none(ptent))
+				++none;
+			if (pte_present(ptent) && is_zero_pfn(pte_pfn(ptent)))
+				++zero_page;
+		}
+		printk("none: %d zero_page: %d\n", none, zero_page);
+	}
 
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(pte, ptl);
