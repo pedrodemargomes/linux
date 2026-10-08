@@ -60,6 +60,8 @@
 #include <linux/parser.h>
 #include <linux/swap_ops.h>
 
+#include <asm/pgalloc.h>
+#include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
 
@@ -3682,7 +3684,6 @@ static void walk_update_folio(struct lru_gen_mm_walk *walk, struct vm_area_struc
 static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 			   struct mm_walk *args)
 {
-	printk("walk_pte_range\n");
 	int i;
 	bool dirty;
 	pte_t *pte;
@@ -3696,7 +3697,11 @@ static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 	struct pglist_data *pgdat = lruvec_pgdat(walk->lruvec);
 	unsigned int nr;
 	pmd_t pmdval;
-
+	bool reclaim = false;
+	unsigned long origstart = start;
+	struct mmu_gather tlb;
+	struct mmu_gather *tlbp = &tlb;
+	
 	pte = pte_offset_map_rw_nolock(args->mm, pmd, start & PMD_MASK, &pmdval, &ptl);
 	if (!pte)
 		return false;
@@ -3763,7 +3768,7 @@ restart:
 	if (i < PTRS_PER_PTE && get_next_vma(PMD_MASK, PAGE_SIZE, args, &start, &end))
 		goto restart;
 
-	if (i == PTRS_PER_PTE && young == PTRS_PER_PTE) {
+	if (i == PTRS_PER_PTE && young == 0) {
 		int none = 0;
 		int zero_page = 0;
 		for (int j = 0; j < PTRS_PER_PTE; ++j) {
@@ -3774,11 +3779,30 @@ restart:
 			if (pte_present(ptent) && is_zero_pfn(pte_pfn(ptent)))
 				++zero_page;
 		}
-		printk("none: %d zero_page: %d\n", none, zero_page);
+
+		if (none + zero_page == PTRS_PER_PTE) {
+			spinlock_t *pml = pmd_lockptr(args->mm, pmd);
+			if (ptl == pml || spin_trylock(pml)) {
+				 if (pmd_same(pmdval, pmdp_get(pmd))) {
+					pmd_clear(pmd);
+					reclaim = true;
+				}
+				if (ptl != pml)
+					spin_unlock(pml);
+			}
+		}
+		printk("none: %d zero_page: %d young: %d\n", none, zero_page, young);
 	}
 
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(pte, ptl);
+
+	if (reclaim) {
+		tlb_gather_mmu(tlbp, args->mm);
+		pte_free_tlb(tlbp, pmd_pgtable(pmdval), origstart);
+		tlb_finish_mmu(tlbp);
+		mm_dec_nr_ptes(args->mm);
+	}
 
 	return suitable_to_scan(total, young);
 }
