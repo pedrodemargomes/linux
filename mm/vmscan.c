@@ -3701,6 +3701,9 @@ static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 	unsigned long origstart = start;
 	struct mmu_gather tlb;
 	struct mmu_gather *tlbp = &tlb;
+	int none, zero_page;
+
+	tlb_gather_mmu(tlbp, args->mm);
 	
 	pte = pte_offset_map_rw_nolock(args->mm, pmd, start & PMD_MASK, &pmdval, &ptl);
 	if (!pte)
@@ -3718,6 +3721,9 @@ static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 
 	lazy_mmu_mode_enable();
 restart:
+	none = 0;
+	zero_page = 0;
+
 	for (i = pte_index(start), addr = start; addr != end; i += nr, addr += nr * PAGE_SIZE) {
 		unsigned long pfn;
 		struct folio *folio;
@@ -3727,6 +3733,11 @@ restart:
 		nr = 1;
 		total++;
 		walk->mm_stats[MM_LEAF_TOTAL]++;
+
+		if (pte_none(ptent))
+			++none;
+		if (pte_present(ptent) && is_zero_pfn(pte_pfn(ptent)))
+			++zero_page;
 
 		pfn = get_pte_pfn(ptent, args->vma, addr, pgdat);
 		if (pfn == -1)
@@ -3768,40 +3779,31 @@ restart:
 	if (i < PTRS_PER_PTE && get_next_vma(PMD_MASK, PAGE_SIZE, args, &start, &end))
 		goto restart;
 
-	if (i == PTRS_PER_PTE && young == 0) {
-		int none = 0;
-		int zero_page = 0;
-		for (int j = 0; j < PTRS_PER_PTE; ++j) {
-			pte_t *cur_pte = pte + j;
-			pte_t ptent = ptep_get(cur_pte);
-			if (pte_none(ptent))
-				++none;
-			if (pte_present(ptent) && is_zero_pfn(pte_pfn(ptent)))
-				++zero_page;
-		}
-
-		if (none + zero_page == PTRS_PER_PTE) {
-			spinlock_t *pml = pmd_lockptr(args->mm, pmd);
-			if (ptl == pml || spin_trylock(pml)) {
-				 if (pmd_same(pmdval, pmdp_get(pmd))) {
-					pmd_clear(pmd);
-					reclaim = true;
+	if (i == PTRS_PER_PTE && none + zero_page == PTRS_PER_PTE) {
+		printk("none: %d zero_page: %d\n", none, zero_page);
+		spinlock_t *pml = pmd_lockptr(args->mm, pmd);
+		if (ptl == pml || spin_trylock(pml)) {
+			 if (pmd_same(pmdval, pmdp_get(pmd))) {
+				pmd_clear(pmd);
+				if (zero_page > 0) {
+					tlb_flush_pte_range(tlbp, origstart & PMD_MASK, PMD_SIZE);
+					tlb_flush_mmu_tlbonly(tlbp);
 				}
-				if (ptl != pml)
-					spin_unlock(pml);
+				reclaim = true;
 			}
+			if (ptl != pml)
+				spin_unlock(pml);
 		}
-		printk("none: %d zero_page: %d young: %d\n", none, zero_page, young);
 	}
 
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(pte, ptl);
 
 	if (reclaim) {
-		tlb_gather_mmu(tlbp, args->mm);
-		pte_free_tlb(tlbp, pmd_pgtable(pmdval), origstart);
+		pte_free_tlb(tlbp, pmd_pgtable(pmdval), origstart & PMD_MASK);
 		tlb_finish_mmu(tlbp);
 		mm_dec_nr_ptes(args->mm);
+		printk("PTE page table reclaimed\n");
 	}
 
 	return suitable_to_scan(total, young);
@@ -3951,7 +3953,7 @@ restart:
 
 		walk->mm_stats[MM_NONLEAF_FOUND]++;
 
-		if (!walk_pte_range(&val, addr, next, args))
+		if (!walk_pte_range(pmd+i, addr, next, args))
 			continue;
 
 		walk->mm_stats[MM_NONLEAF_ADDED]++;
@@ -4010,6 +4012,7 @@ done:
 
 static void walk_mm(struct mm_struct *mm, struct lru_gen_mm_walk *walk)
 {
+	printk("walk_mm\n");
 	static const struct mm_walk_ops mm_walk_ops = {
 		.test_walk = should_skip_vma,
 		.p4d_entry = walk_pud_range,
