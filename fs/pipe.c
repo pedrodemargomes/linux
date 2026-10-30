@@ -595,6 +595,8 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 				break;
 			}
 
+			// copy from user to pipe page
+			// https://lore.kernel.org/linux-fsdevel/cm7xsdvj6ij3k2ad6jp46eojgazlr4prejrqywezo7p73kzagm@myk7rx2cuae7/T/#Z2e.:..:20261015085326.340074-1-liqiang01::40kylinos.cn:1fs:pipe.c
 			copied = copy_page_from_iter(page, 0, PAGE_SIZE, from);
 			if (unlikely(copied < PAGE_SIZE && iov_iter_count(from))) {
 				anon_pipe_put_page(pipe, page);
