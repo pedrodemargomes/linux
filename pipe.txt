@@ -1,0 +1,66 @@
+==> SMAP
+
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=6097
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=128 rate=2/s
+throughput_MBps: 2184.53
+lat_avg_ns: 469661619
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 1073741823
+lat_max_ns: 571027439
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=6118
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=128 rate=2/s
+throughput_MBps: 2184.53
+lat_avg_ns: 471361593
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 1073741823
+lat_max_ns: 601350117
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=6183
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=124 rate=2/s
+throughput_MBps: 2116.27
+lat_avg_ns: 485313240
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 1073741823
+lat_max_ns: 623946576
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
+
+==> NO SMAP
+
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=10460
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=132 rate=2/s
+throughput_MBps: 2252.80
+lat_avg_ns: 454946540
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 536870911
+lat_max_ns: 504474762
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=10626
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=130 rate=2/s
+throughput_MBps: 2218.67
+lat_avg_ns: 461838600
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 1073741823
+lat_max_ns: 584093685
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$ ./pipe_bench -w 1 -r 1 -s 1073741824 -p 1048576 -d 60
+pid=10651
+config: writers=1 readers=1 msgsize=1073741824 duration=60 pipe_size=1048576 memory_pressure=no
+writes: total=129 rate=2/s
+throughput_MBps: 2201.60
+lat_avg_ns: 466306180
+lat_p50_ns_upper: 536870911
+lat_p99_ns_upper: 1073741823
+lat_max_ns: 638980773
+pedro@fedora:~/tmp/linux/tools/testing/selftests/pipe$
