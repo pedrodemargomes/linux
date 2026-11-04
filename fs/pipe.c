@@ -503,6 +503,51 @@ static inline bool pipe_writable(const struct pipe_inode_info *pipe)
 		!READ_ONCE(pipe->readers);
 }
 
+static inline int pipe_write_batch_size(struct pipe_inode_info *pipe) {
+	int free_slots = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
+	int slots_to_write  = DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE);
+	return min3(PIPE_DEF_BUFFERS, free_slots, slots_to_write);
+}
+
+
+static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from) {
+	struct page *page;
+	struct page *pages[PIPE_DEF_BUFFERS];
+
+	for (int i = 0; i < nr; i++) {
+		page = anon_pipe_get_page(pipe);
+		if (unlikely(!page)) {
+			// ERROR
+			return -1;
+		}
+		pages[i] = page;
+	}
+
+	for (int i = 0; i < nr; i++) {
+		struct pipe_buffer *buf = pipe_buf(pipe, pipe->head + i);
+		const char __user *src = from->ubuf + from->iov_offset;
+		int len = min(PAGE_SIZE, iov_iter_count(from));
+
+		unsafe_copy_user_generic(pages[i], src, len);
+
+		buf->page = pages[i];
+		buf->ops = &anon_pipe_buf_ops;
+		buf->offset = 0;
+		if (is_packetized(filp))
+			buf->flags = PIPE_BUF_FLAG_PACKET;
+		else
+			buf->flags = PIPE_BUF_FLAG_CAN_MERGE;
+
+		buf->len = copied;
+		ret += copied;
+
+		iov_iter_advance(from, len)
+	}
+
+	if (!iov_iter_count(from))
+		break;
+}
+
 static ssize_t
 anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 {
@@ -587,6 +632,14 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			struct pipe_buffer *buf;
 			struct page *page;
 			int copied;
+
+			int nr = pipe_write_batch_size(pipe);
+			if (nr > 1) {
+				int ret = pipe_write_batch(pipe, nr);
+				if (!iov_iter_count(from))
+					break;
+				continue;	
+			}
 
 			page = anon_pipe_get_page(pipe);
 			if (unlikely(!page)) {

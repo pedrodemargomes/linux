@@ -116,9 +116,8 @@ __must_check unsigned long
 rep_movs_alternative(void *to, const void *from, unsigned len);
 
 static __always_inline __must_check unsigned long
-copy_user_generic(void *to, const void *from, unsigned long len)
+unsafe_copy_user_generic(void *to, const void *from, unsigned long len)
 {
-	stac();
 	/*
 	 * If CPU has FSRM feature, use 'rep movs'.
 	 * Otherwise, use rep_movs_alternative.
@@ -131,6 +130,14 @@ copy_user_generic(void *to, const void *from, unsigned long len)
 		_ASM_EXTABLE_UA(1b, 2b)
 		:"+c" (len), "+D" (to), "+S" (from), ASM_CALL_CONSTRAINT
 		: : "memory", "rax");
+	return len;
+}
+
+static __always_inline __must_check unsigned long
+copy_user_generic(void *to, const void *from, unsigned long len)
+{
+	stac();
+	unsafe_copy_user_generic(to, from, len);
 	clac();
 	return len;
 }
