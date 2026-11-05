@@ -137,7 +137,7 @@ static __always_inline __must_check unsigned long
 copy_user_generic(void *to, const void *from, unsigned long len)
 {
 	stac();
-	unsafe_copy_user_generic(to, from, len);
+	len = unsafe_copy_user_generic(to, from, len);
 	clac();
 	return len;
 }

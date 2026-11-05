@@ -503,32 +503,50 @@ static inline bool pipe_writable(const struct pipe_inode_info *pipe)
 		!READ_ONCE(pipe->readers);
 }
 
-static inline int pipe_write_batch_size(struct pipe_inode_info *pipe) {
+static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
 	int free_slots = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
 	int slots_to_write  = DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE);
 	return min3(PIPE_DEF_BUFFERS, free_slots, slots_to_write);
 }
 
-
-static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from) {
+static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp) {
+	int i;
 	struct page *page;
 	struct page *pages[PIPE_DEF_BUFFERS];
-
-	for (int i = 0; i < nr; i++) {
+	void *kaddr[PIPE_DEF_BUFFERS];
+	const char __user *src = from->ubuf + from->iov_offset;
+	
+	for (i = 0; i < nr; i++) {
 		page = anon_pipe_get_page(pipe);
-		if (unlikely(!page)) {
-			// ERROR
-			return -1;
-		}
+		if (unlikely(!page))
+			break;
 		pages[i] = page;
+		kaddr[i] = kmap_local_page(page);
+		instrument_copy_from_user_before(kaddr[i], src + i*PAGE_SIZE, min(PAGE_SIZE, iov_iter_count(from)-i*PAGE_SIZE));
 	}
+	if (!i)
+		return -ENOMEM;
+	nr = i;
+	int lastsz = iov_iter_count(from) - (nr-1)*PAGE_SIZE;
+	for (i = 0; i < nr-1; i++) {
+		unsafe_copy_user_generic(kaddr[i], src + i*PAGE_SIZE, PAGE_SIZE);
+	}
+	unsafe_copy_user_generic(kaddr[nr-1], src + i*PAGE_SIZE, lastsz);
 
-	for (int i = 0; i < nr; i++) {
-		struct pipe_buffer *buf = pipe_buf(pipe, pipe->head + i);
+	for (i = 0; i < nr; i++) {
+		unsigned long r;
+		struct pipe_buffer *buf = pipe_buf(pipe, pipe->head);
 		const char __user *src = from->ubuf + from->iov_offset;
 		int len = min(PAGE_SIZE, iov_iter_count(from));
+		void *kaddr = kmap_local_page(pages[i]);
 
-		unsafe_copy_user_generic(pages[i], src, len);
+		instrument_copy_from_user_before(kaddr, src, len);
+		r = unsafe_copy_user_generic(kaddr, src, len);
+		instrument_copy_from_user_after(kaddr, src, len, r);
+		
+		// If nothing was copied
+		if (r == len)
+			break;
 
 		buf->page = pages[i];
 		buf->ops = &anon_pipe_buf_ops;
@@ -537,15 +555,17 @@ static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct 
 			buf->flags = PIPE_BUF_FLAG_PACKET;
 		else
 			buf->flags = PIPE_BUF_FLAG_CAN_MERGE;
-
-		buf->len = copied;
-		ret += copied;
-
-		iov_iter_advance(from, len)
+		buf->len = len - r;
+		pipe->head = pipe->head + 1;
+		iov_iter_advance(from, len - r);
+		if (r)
+			break;
+	}
+	for (;i < nr; i++) {
+		anon_pipe_put_page(pipe, pages[i]);
 	}
 
-	if (!iov_iter_count(from))
-		break;
+	return 0;
 }
 
 static ssize_t
@@ -633,9 +653,11 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			struct page *page;
 			int copied;
 
-			int nr = pipe_write_batch_size(pipe);
+			int nr = pipe_write_batch_size(pipe, from);
 			if (nr > 1) {
-				int ret = pipe_write_batch(pipe, nr);
+				int ret = pipe_write_batch(pipe, nr, from, filp);
+				if (ret)
+					return ret;
 				if (!iov_iter_count(from))
 					break;
 				continue;	
