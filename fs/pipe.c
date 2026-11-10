@@ -522,7 +522,7 @@ static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct 
 	const char __user *src = from->ubuf + from->iov_offset;
 	int ret = 0;
 	size_t len = iov_iter_count(from);
-	
+
 	for (i = 0; i < nr; i++) {
 		struct page *page = anon_pipe_get_page(pipe);
 		if (unlikely(!page))
