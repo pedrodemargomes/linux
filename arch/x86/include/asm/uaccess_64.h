@@ -133,6 +133,8 @@ unsafe_copy_user_generic(void *to, const void *from, unsigned long len)
 	return len;
 }
 
+#define unsafe_copy_user_generic unsafe_copy_user_generic
+
 static __always_inline __must_check unsigned long
 copy_user_generic(void *to, const void *from, unsigned long len)
 {

@@ -340,6 +340,73 @@ static inline unsigned int pipe_update_tail(struct pipe_inode_info *pipe,
 	return tail;
 }
 
+#if defined(unsafe_copy_user_generic)
+struct pipe_buf_copy_src {
+	void *kaddr;
+	size_t len;
+};
+
+static inline int pipe_read_batch_size(struct pipe_inode_info *pipe, struct iov_iter *to) {
+	int slots_to_read = pipe_occupancy(pipe->head, pipe->tail);
+
+	if (!iter_is_ubuf(to))
+		return 0;
+
+	return min(PIPE_DEF_BUFFERS, slots_to_read);
+}
+
+static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t total_len, size_t *copied) {
+	printk(KERN_ERR "pipe_read_batch\n");
+	int i, j;
+	unsigned long r;
+	struct pipe_buf_copy_src pipe_copy[PIPE_DEF_BUFFERS];
+	char __user *dst = to->ubuf + to->iov_offset;
+	int ret = 0;
+	size_t len = 0;
+
+	for (i = 0; i < nr; i++) {
+		struct pipe_buffer *buf = pipe_buf(pipe, pipe->tail + i);
+		struct page *page = buf->page;
+		if (total_len < len + buf->len)
+			break;
+		pipe_copy[i].kaddr = page_address(page) + buf->offset;
+		pipe_copy[i].len = buf->len;
+		instrument_copy_to_user(dst + len, pipe_copy[i].kaddr, pipe_copy[i].len);
+		len += buf->len;
+	}
+	if (!i)
+		goto out;
+	if (!user_access_begin(dst, len)) {
+		ret = -EFAULT;
+		goto out;
+	}
+	for (j = 0; j < i; j++) {
+		r = unsafe_copy_user_generic(dst, pipe_copy[j].kaddr, pipe_copy[j].len);
+		if (unlikely(r))
+			goto out_loop;
+		dst += pipe_copy[j].len;
+		*copied += pipe_copy[j].len; 
+	}
+out_loop:
+	user_access_end();
+	if (!j) {
+		ret = -EFAULT;
+		goto out;
+	}
+	pipe->tail += j;
+	iov_iter_advance(to, *copied);
+out:
+	return ret;
+}
+#else
+static inline int pipe_read_batch_size(struct pipe_inode_info *pipe, struct iov_iter *to) {
+	return 0;
+}
+static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t *copied) {
+	return -EFAULT;
+}
+#endif
+
 static ssize_t
 anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 {
@@ -406,6 +473,26 @@ anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 					break;
 				}
 				chars = total_len;
+			}
+
+			int nr = pipe_read_batch_size(pipe, to);
+			printk(KERN_ERR "pipe_read_batch_size %d\n", nr);
+			if (nr > 1) {
+				size_t copied = 0;
+				int err = pipe_read_batch(pipe, nr, to, total_len, &copied);
+				printk(KERN_ERR "pipe_read_batch err: %d nr: %d total_len: %ld copied: %ld\n", err, nr, total_len, copied);
+				if (unlikely(err)) {
+					if (!ret)
+						ret = err;
+					break;
+				}
+				if (copied) {
+					ret += copied;
+					total_len -= copied;
+					if (!total_len)
+						break;
+					continue;
+				}
 			}
 
 			error = pipe_buf_confirm(pipe, buf);
@@ -504,7 +591,7 @@ static inline bool pipe_writable(const struct pipe_inode_info *pipe)
 }
 
 
-#if defined(unsafe_copy_from_user) && !defined(CONFIG_HIGHMEM)
+#if defined(unsafe_copy_user_generic) && !defined(CONFIG_HIGHMEM)
 static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
 	int free_slots = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
 	int slots_to_write  = DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE);
@@ -516,6 +603,7 @@ static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov
 }
 
 static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
+	printk(KERN_ERR "pipe_write_batch\n");
 	int i, j;
 	unsigned long r;
 	void *kaddr[PIPE_DEF_BUFFERS];
@@ -577,13 +665,13 @@ out:
 }
 #else
 static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
+	printk(KERN_ERR "pipe_write_batch_size undef\n");
 	return 0;
 }
 
 static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
 	return -EFAULT;
 }
-
 #endif
 
 static ssize_t
@@ -672,6 +760,7 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			int copied;
 
 			int nr = pipe_write_batch_size(pipe, from);
+			printk(KERN_ERR "pipe_write_batch_size %d\n", nr);
 			if (nr > 1) {
 				int err = pipe_write_batch(pipe, nr, from, filp, &ret);
 				if (unlikely(err)) {
