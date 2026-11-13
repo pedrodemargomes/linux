@@ -340,7 +340,79 @@ static inline unsigned int pipe_update_tail(struct pipe_inode_info *pipe,
 	return tail;
 }
 
-#if defined(unsafe_copy_user_generic)
+#if defined(unsafe_copy_user_generic) && !defined(CONFIG_HIGHMEM)
+static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
+	int free_slots = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
+	int slots_to_write  = DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE);
+
+	if (!iter_is_ubuf(from))
+		return 0;
+
+	return min3(PIPE_DEF_BUFFERS, free_slots, slots_to_write);
+}
+
+static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
+	int i, j;
+	unsigned long r;
+	void *kaddr[PIPE_DEF_BUFFERS];
+	const char __user *src = from->ubuf + from->iov_offset;
+	int ret = 0;
+	size_t len = iov_iter_count(from);
+
+	for (i = 0; i < nr; i++) {
+		struct page *page = anon_pipe_get_page(pipe);
+		if (unlikely(!page))
+			break;
+		kaddr[i] = page_address(page);
+		instrument_copy_from_user_before(kaddr[i], src + i*PAGE_SIZE, min(PAGE_SIZE, len-i*PAGE_SIZE));
+	}
+	if (!i)
+		return -ENOMEM;
+	nr = i;
+	if (!user_access_begin(src, min(nr*PAGE_SIZE, len))) {
+		i = 0;
+		ret = -EFAULT;
+		goto out;
+	}
+	for (i = 0; i < nr-1; i++) {
+		r = unsafe_copy_user_generic(kaddr[i], src + i*PAGE_SIZE, PAGE_SIZE);
+		if (unlikely(r))
+			goto out_loop;
+	}
+	r = unsafe_copy_user_generic(kaddr[i], src + i*PAGE_SIZE, min(PAGE_SIZE, len-i*PAGE_SIZE));
+	if (unlikely(r))
+		goto out_loop;
+	i = nr;
+out_loop:
+	user_access_end();
+	if (!i) {
+		ret = -EFAULT;
+		goto out;
+	}
+	for (j = 0; j < i; j++) {
+		instrument_copy_from_user_after(kaddr[j], src + j*PAGE_SIZE, min(PAGE_SIZE, len-j*PAGE_SIZE), 0);
+
+		struct pipe_buffer *buf = pipe_buf(pipe, pipe->head);
+		buf->page = virt_to_page(kaddr[j]);
+		buf->ops = &anon_pipe_buf_ops;
+		buf->offset = 0;
+		if (is_packetized(filp))
+			buf->flags = PIPE_BUF_FLAG_PACKET;
+		else
+			buf->flags = PIPE_BUF_FLAG_CAN_MERGE;
+		buf->len = min(PAGE_SIZE, len-j*PAGE_SIZE);
+		*copied += buf->len;
+		pipe->head = pipe->head + 1;
+	}
+	iov_iter_advance(from, *copied);
+out:
+	for (;i < nr; i++)
+		anon_pipe_put_page(pipe, virt_to_page(kaddr[i]));
+
+	return ret;
+}
+
+
 struct pipe_buf_copy_src {
 	void *kaddr;
 	size_t len;
@@ -355,8 +427,7 @@ static inline int pipe_read_batch_size(struct pipe_inode_info *pipe, struct iov_
 	return min(PIPE_DEF_BUFFERS, slots_to_read);
 }
 
-static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t total_len, size_t *copied) {
-	printk(KERN_ERR "pipe_read_batch\n");
+static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t total_len, size_t *copied, unsigned int *tail, bool *wake_writer) {
 	int i, j;
 	unsigned long r;
 	struct pipe_buf_copy_src pipe_copy[PIPE_DEF_BUFFERS];
@@ -365,7 +436,7 @@ static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct i
 	size_t len = 0;
 
 	for (i = 0; i < nr; i++) {
-		struct pipe_buffer *buf = pipe_buf(pipe, pipe->tail + i);
+		struct pipe_buffer *buf = pipe_buf(pipe, *tail + i);
 		struct page *page = buf->page;
 		if (total_len < len + buf->len)
 			break;
@@ -393,16 +464,30 @@ out_loop:
 		ret = -EFAULT;
 		goto out;
 	}
-	pipe->tail += j;
+	if (pipe_full(pipe->head, *tail, pipe->max_usage))
+		*wake_writer = true;
+	for (int k = 0; k < j; k++)
+		*tail = pipe_update_tail(pipe, pipe_buf(pipe, *tail), *tail);
 	iov_iter_advance(to, *copied);
+
+	//printk(KERN_ERR "pipe size: %d\n", pipe_occupancy(pipe->head, pipe->tail));
 out:
 	return ret;
 }
 #else
-static inline int pipe_read_batch_size(struct pipe_inode_info *pipe, struct iov_iter *to) {
+static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
+	printk(KERN_ERR "pipe_write_batch_size undef\n");
 	return 0;
 }
-static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t *copied) {
+
+static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
+	return -EFAULT;
+}
+static inline int pipe_read_batch_size(struct pipe_inode_info *pipe, struct iov_iter *to) {
+	printk(KERN_ERR "pipe_read_batch_size undef\n");
+	return 0;
+}
+static inline int pipe_read_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *to, size_t *copied, unsigned int *tail, bool *wake_writer) {
 	return -EFAULT;
 }
 #endif
@@ -476,11 +561,10 @@ anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 			}
 
 			int nr = pipe_read_batch_size(pipe, to);
-			printk(KERN_ERR "pipe_read_batch_size %d\n", nr);
 			if (nr > 1) {
 				size_t copied = 0;
-				int err = pipe_read_batch(pipe, nr, to, total_len, &copied);
-				printk(KERN_ERR "pipe_read_batch err: %d nr: %d total_len: %ld copied: %ld\n", err, nr, total_len, copied);
+				int err = pipe_read_batch(pipe, nr, to, total_len, &copied, &tail, &wake_writer);
+				//printk(KERN_ERR "err: %d copied: %ld nr: %d total_len: %ld\n", err, copied, nr, total_len);
 				if (unlikely(err)) {
 					if (!ret)
 						ret = err;
@@ -592,86 +676,8 @@ static inline bool pipe_writable(const struct pipe_inode_info *pipe)
 
 
 #if defined(unsafe_copy_user_generic) && !defined(CONFIG_HIGHMEM)
-static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
-	int free_slots = pipe->max_usage - pipe_occupancy(pipe->head, pipe->tail);
-	int slots_to_write  = DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE);
-
-	if (!iter_is_ubuf(from))
-		return 0;
-
-	return min3(PIPE_DEF_BUFFERS, free_slots, slots_to_write);
-}
-
-static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
-	printk(KERN_ERR "pipe_write_batch\n");
-	int i, j;
-	unsigned long r;
-	void *kaddr[PIPE_DEF_BUFFERS];
-	const char __user *src = from->ubuf + from->iov_offset;
-	int ret = 0;
-	size_t len = iov_iter_count(from);
-
-	for (i = 0; i < nr; i++) {
-		struct page *page = anon_pipe_get_page(pipe);
-		if (unlikely(!page))
-			break;
-		kaddr[i] = page_address(page);
-		instrument_copy_from_user_before(kaddr[i], src + i*PAGE_SIZE, min(PAGE_SIZE, len-i*PAGE_SIZE));
-	}
-	if (!i)
-		return -ENOMEM;
-	nr = i;
-	if (!user_access_begin(src, min(nr*PAGE_SIZE, len))) {
-		i = 0;
-		ret = -EFAULT;
-		goto out;
-	}
-	for (i = 0; i < nr-1; i++) {
-		r = unsafe_copy_user_generic(kaddr[i], src + i*PAGE_SIZE, PAGE_SIZE);
-		if (unlikely(r))
-			goto out_loop;
-	}
-	r = unsafe_copy_user_generic(kaddr[i], src + i*PAGE_SIZE, min(PAGE_SIZE, len-i*PAGE_SIZE));
-	if (unlikely(r))
-		goto out_loop;
-	i = nr;
-out_loop:
-	user_access_end();
-	if (!i) {
-		ret = -EFAULT;
-		goto out;
-	}
-	for (j = 0; j < i; j++) {
-		instrument_copy_from_user_after(kaddr[j], src + j*PAGE_SIZE, min(PAGE_SIZE, len-j*PAGE_SIZE), 0);
-
-		struct pipe_buffer *buf = pipe_buf(pipe, pipe->head);
-		buf->page = virt_to_page(kaddr[j]);
-		buf->ops = &anon_pipe_buf_ops;
-		buf->offset = 0;
-		if (is_packetized(filp))
-			buf->flags = PIPE_BUF_FLAG_PACKET;
-		else
-			buf->flags = PIPE_BUF_FLAG_CAN_MERGE;
-		buf->len = min(PAGE_SIZE, len-j*PAGE_SIZE);
-		*copied += buf->len;
-		pipe->head = pipe->head + 1;
-	}
-	iov_iter_advance(from, *copied);
-out:
-	for (;i < nr; i++)
-		anon_pipe_put_page(pipe, virt_to_page(kaddr[i]));
-
-	return ret;
-}
 #else
-static inline int pipe_write_batch_size(struct pipe_inode_info *pipe, struct iov_iter *from) {
-	printk(KERN_ERR "pipe_write_batch_size undef\n");
-	return 0;
-}
 
-static inline int pipe_write_batch(struct pipe_inode_info *pipe, int nr, struct iov_iter *from, struct file *filp, size_t *copied) {
-	return -EFAULT;
-}
 #endif
 
 static ssize_t
@@ -760,9 +766,11 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			int copied;
 
 			int nr = pipe_write_batch_size(pipe, from);
-			printk(KERN_ERR "pipe_write_batch_size %d\n", nr);
 			if (nr > 1) {
-				int err = pipe_write_batch(pipe, nr, from, filp, &ret);
+				size_t copied = 0;
+				int err = pipe_write_batch(pipe, nr, from, filp, &copied);
+				//printk(KERN_ERR "err: %d nr: %d iov_sz: %ld copied: %ld\n", err, nr, iov_iter_count(from), copied);
+				ret += copied;
 				if (unlikely(err)) {
 					if (!ret)
 						ret = err;
