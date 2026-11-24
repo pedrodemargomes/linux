@@ -111,31 +111,9 @@ void pipe_double_lock(struct pipe_inode_info *pipe1,
 	pipe_lock(pipe2);
 }
 
-static struct page *anon_pipe_get_page(struct pipe_inode_info *pipe)
-{
-	for (int i = 0; i < ARRAY_SIZE(pipe->tmp_page); i++) {
-		if (pipe->tmp_page[i]) {
-			struct page *page = pipe->tmp_page[i];
-			pipe->tmp_page[i] = NULL;
-			return page;
-		}
-	}
-
-	return alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
-}
-
 static void anon_pipe_put_page(struct pipe_inode_info *pipe,
 			       struct page *page)
 {
-	if (page_count(page) == 1) {
-		for (int i = 0; i < ARRAY_SIZE(pipe->tmp_page); i++) {
-			if (!pipe->tmp_page[i]) {
-				pipe->tmp_page[i] = page;
-				return;
-			}
-		}
-	}
-
 	put_page(page);
 }
 
@@ -384,6 +362,11 @@ static inline bool pipe_writable(const struct pipe_inode_info *pipe)
 		!READ_ONCE(pipe->readers);
 }
 
+struct pipe_write_buf {
+	struct page *page;
+	size_t len;
+};
+
 static ssize_t
 anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 {
@@ -392,9 +375,10 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 	unsigned int head;
 	ssize_t ret = 0;
 	size_t total_len = iov_iter_count(from);
-	ssize_t chars;
 	bool was_empty = false;
 	bool wake_next_writer = false;
+	struct pipe_write_buf pipe_write_buf[PIPE_DEF_BUFFERS];
+	int i;
 
 	/*
 	 * Reject writing to watch queue pipes before the point where we lock
@@ -413,14 +397,38 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 		return 0;
 
 	mutex_lock(&pipe->mutex);
-
 	if (!pipe->readers) {
 		if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
 			send_sig(SIGPIPE, current, 0);
 		ret = -EPIPE;
+
 		goto out;
 	}
+	mutex_unlock(&pipe->mutex);
 
+	mutex_lock(&pipe->write_mutex);
+	unsigned int free_bufs = READ_ONCE(pipe->max_usage) - pipe_buf_usage(pipe);
+	for (i = 0; i < min3(PIPE_DEF_BUFFERS, free_bufs, DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE)); ++i) {
+		struct page *page = alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
+		if (!page)
+			break;
+		pipe_write_buf[i].page = page;
+	
+		int copied = copy_page_from_iter(page, 0, PAGE_SIZE, from);
+		if (unlikely(copied < PAGE_SIZE && iov_iter_count(from))) {
+			kfree(page);
+			break;
+		}
+		pipe_write_buf[i].len = copied;
+	}
+	mutex_unlock(&pipe->write_mutex);
+
+	/* Null write succeeds. */
+	if (!i)
+		return 0;
+
+	mutex_lock(&pipe->mutex);
+	was_empty = pipe_empty(head, pipe->tail);
 	/*
 	 * If it wasn't empty we try to merge new data into
 	 * the last buffer.
@@ -428,9 +436,7 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 	 * That naturally merges small writes, but it also
 	 * page-aligns the rest of the writes for large writes
 	 * spanning multiple pages.
-	 */
 	head = pipe->head;
-	was_empty = pipe_empty(head, pipe->tail);
 	chars = total_len & (PAGE_SIZE-1);
 	if (chars && !was_empty) {
 		struct pipe_buffer *buf = pipe_buf(pipe, head - 1);
@@ -453,41 +459,17 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 				goto out;
 		}
 	}
+	 */
 
-	for (;;) {
-		if (!pipe->readers) {
-			if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
-				send_sig(SIGPIPE, current, 0);
-			if (!ret)
-				ret = -EPIPE;
-			break;
-		}
-
+	for (int j = 0 ; j < i; ++j) {
 		head = pipe->head;
 		if (!pipe_full(head, pipe->tail, pipe->max_usage)) {
 			struct pipe_buffer *buf;
-			struct page *page;
-			int copied;
-
-			page = anon_pipe_get_page(pipe);
-			if (unlikely(!page)) {
-				if (!ret)
-					ret = -ENOMEM;
-				break;
-			}
-
-			copied = copy_page_from_iter(page, 0, PAGE_SIZE, from);
-			if (unlikely(copied < PAGE_SIZE && iov_iter_count(from))) {
-				anon_pipe_put_page(pipe, page);
-				if (!ret)
-					ret = -EFAULT;
-				break;
-			}
 
 			pipe->head = head + 1;
 			/* Insert it into the buffer array */
 			buf = pipe_buf(pipe, head);
-			buf->page = page;
+			buf->page = pipe_write_buf[j].page;
 			buf->ops = &anon_pipe_buf_ops;
 			buf->offset = 0;
 			if (is_packetized(filp))
@@ -495,43 +477,24 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			else
 				buf->flags = PIPE_BUF_FLAG_CAN_MERGE;
 
-			buf->len = copied;
-			ret += copied;
-
-			if (!iov_iter_count(from))
-				break;
+			buf->len = pipe_write_buf[j].len;
+			ret += pipe_write_buf[j].len;
 
 			continue;
 		}
-
-		/* Wait for buffer space to become available. */
-		if ((filp->f_flags & O_NONBLOCK) ||
-		    (iocb->ki_flags & IOCB_NOWAIT)) {
-			if (!ret)
-				ret = -EAGAIN;
-			break;
-		}
-		if (signal_pending(current)) {
-			if (!ret)
-				ret = -ERESTARTSYS;
-			break;
-		}
-
-		/*
-		 * We're going to release the pipe lock and wait for more
-		 * space. We wake up any readers if necessary, and then
-		 * after waiting we need to re-check whether the pipe
-		 * become empty while we dropped the lock.
-		 */
-		mutex_unlock(&pipe->mutex);
-		if (was_empty)
-			wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
-		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
-		wait_event_interruptible_exclusive(pipe->wr_wait, pipe_writable(pipe));
-		mutex_lock(&pipe->mutex);
-		was_empty = pipe_is_empty(pipe);
-		wake_next_writer = true;
+		// If we got here there is an error
+		printk("Error pipe_full in write\n");
+		panic("Error pipe_full in write");
 	}
+	mutex_unlock(&pipe->mutex);
+	if (was_empty)
+		wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
+	kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
+	wait_event_interruptible_exclusive(pipe->wr_wait, pipe_writable(pipe));
+	mutex_lock(&pipe->mutex);
+	was_empty = pipe_is_empty(pipe);
+	wake_next_writer = true;
+
 out:
 	if (pipe_is_full(pipe))
 		wake_next_writer = false;
@@ -792,7 +755,9 @@ struct pipe_inode_info *alloc_pipe_info(void)
 		pipe->nr_accounted = pipe_bufs;
 		pipe->user = user;
 		mutex_init(&pipe->mutex);
+		mutex_init(&pipe->write_mutex);
 		lock_set_cmp_fn(&pipe->mutex, pipe_lock_cmp_fn, NULL);
+		lock_set_cmp_fn(&pipe->write_mutex, pipe_lock_cmp_fn, NULL);
 		return pipe;
 	}
 
@@ -824,10 +789,6 @@ void free_pipe_info(struct pipe_inode_info *pipe)
 	if (pipe->watch_queue)
 		put_watch_queue(pipe->watch_queue);
 #endif
-	for (i = 0; i < ARRAY_SIZE(pipe->tmp_page); i++) {
-		if (pipe->tmp_page[i])
-			__free_page(pipe->tmp_page[i]);
-	}
 	kfree(pipe->bufs);
 	kfree(pipe);
 }

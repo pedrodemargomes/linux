@@ -59,6 +59,7 @@ union pipe_index {
 /**
  *	struct pipe_inode_info - a linux kernel pipe
  *	@mutex: mutex protecting the whole thing
+ *	@write_mutex: mutex protecting from buffer
  *	@rd_wait: reader wait point in case of empty pipe
  *	@wr_wait: writer wait point in case of full pipe
  *	@pipe_index: the pipe indeces
@@ -81,6 +82,7 @@ union pipe_index {
  **/
 struct pipe_inode_info {
 	struct mutex mutex;
+	struct mutex write_mutex;
 	wait_queue_head_t rd_wait, wr_wait;
 
 	union pipe_index;
@@ -97,7 +99,6 @@ struct pipe_inode_info {
 #ifdef CONFIG_WATCH_QUEUE
 	bool note_loss;
 #endif
-	struct page *tmp_page[2];
 	struct fasync_struct *fasync_readers;
 	struct fasync_struct *fasync_writers;
 	struct pipe_buffer *bufs;
