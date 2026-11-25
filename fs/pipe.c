@@ -417,7 +417,6 @@ again:
 	}
 	mutex_unlock(&pipe->mutex);
 
-	mutex_lock(&pipe->write_mutex);
 	unsigned int free_bufs = READ_ONCE(pipe->max_usage) - pipe_buf_usage(pipe);
 	for (i = 0; i < min3(PIPE_DEF_BUFFERS, free_bufs, DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE)); ++i) {
 		struct page *page = alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
@@ -432,7 +431,6 @@ again:
 		}
 		pipe_write_buf[i].len = copied;
 	}
-	mutex_unlock(&pipe->write_mutex);
 
 	/* Null write succeeds. */
 	if (!i)
@@ -782,9 +780,7 @@ struct pipe_inode_info *alloc_pipe_info(void)
 		pipe->nr_accounted = pipe_bufs;
 		pipe->user = user;
 		mutex_init(&pipe->mutex);
-		mutex_init(&pipe->write_mutex);
 		lock_set_cmp_fn(&pipe->mutex, pipe_lock_cmp_fn, NULL);
-		lock_set_cmp_fn(&pipe->write_mutex, pipe_lock_cmp_fn, NULL);
 		return pipe;
 	}
 
