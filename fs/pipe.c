@@ -293,9 +293,14 @@ anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 
 			if (!buf->len) {
 				wake_writer |= pipe_full(head, tail, pipe->max_usage);
+				/*
+				if (wake_writer)
+					printk("wake_writer = true\n");
+				*/
 				tail = pipe_update_tail(pipe, buf, tail);
 			}
 			total_len -= chars;
+			//printk("total_len: %lu\n", total_len);
 			if (!total_len)
 				break;	/* common path: read succeeded */
 			if (!pipe_empty(head, tail))	/* More to do? */
@@ -320,8 +325,10 @@ anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 		 * since we've done any required wakeups and there's no need
 		 * to mark anything accessed. And we've dropped the lock.
 		 */
+		//printk("read waiting..\n");
 		if (wait_event_interruptible_exclusive(pipe->rd_wait, pipe_readable(pipe)) < 0)
 			return -ERESTARTSYS;
+		//printk("read returned from waiting\n");
 
 		wake_next_reader = true;
 		mutex_lock(&pipe->mutex);
@@ -330,8 +337,10 @@ anon_pipe_read(struct kiocb *iocb, struct iov_iter *to)
 		wake_next_reader = false;
 	mutex_unlock(&pipe->mutex);
 
-	if (wake_writer)
+	if (wake_writer) {
 		wake_up_interruptible_sync_poll(&pipe->wr_wait, EPOLLOUT | EPOLLWRNORM);
+		//printk("wakeup writers\n");
+	}
 	if (wake_next_reader)
 		wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
 	kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
@@ -377,6 +386,7 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 	size_t total_len = iov_iter_count(from);
 	bool was_empty = false;
 	bool wake_next_writer = false;
+	bool is_full = false;
 	struct pipe_write_buf pipe_write_buf[PIPE_DEF_BUFFERS];
 	int i;
 
@@ -396,6 +406,7 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 	if (unlikely(total_len == 0))
 		return 0;
 
+again:
 	mutex_lock(&pipe->mutex);
 	if (!pipe->readers) {
 		if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
@@ -428,7 +439,7 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 		return 0;
 
 	mutex_lock(&pipe->mutex);
-	was_empty = pipe_empty(head, pipe->tail);
+	was_empty = pipe_empty(pipe->head, pipe->tail);
 	/*
 	 * If it wasn't empty we try to merge new data into
 	 * the last buffer.
@@ -480,16 +491,32 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			buf->len = pipe_write_buf[j].len;
 			ret += pipe_write_buf[j].len;
 
+			//printk("insert in pipe j: %d i: %d pipe_occupancy: %u max_usage: %u\n", j, i, pipe_occupancy(pipe->head, pipe->tail), pipe->max_usage);
 			continue;
 		}
-		// If we got here there is an error
-		printk("Error pipe_full in write\n");
-		panic("Error pipe_full in write");
+		mutex_unlock(&pipe->mutex);
+
+		//printk("pipe full in write j: %d i: %d wait\n", j, i);
+		if (was_empty)
+			wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
+		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
+		wait_event_interruptible_exclusive(pipe->wr_wait, pipe_writable(pipe));
+		mutex_lock(&pipe->mutex);
+		was_empty = pipe_is_empty(pipe);
+		wake_next_writer = true;
+		//printk("pipe full in write j: %d i: %d continue\n", j, i);
 	}
+	is_full = pipe_full(pipe->head, pipe->tail, pipe->max_usage);
 	mutex_unlock(&pipe->mutex);
 	if (was_empty)
 		wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
 	kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
+
+	if (!is_full && iov_iter_count(from)) {
+		//printk("goto again\n");
+		goto again;
+	}
+
 	wait_event_interruptible_exclusive(pipe->wr_wait, pipe_writable(pipe));
 	mutex_lock(&pipe->mutex);
 	was_empty = pipe_is_empty(pipe);
