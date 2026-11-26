@@ -412,7 +412,7 @@ again:
 		if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
 			send_sig(SIGPIPE, current, 0);
 		ret = -EPIPE;
-
+		mutex_unlock(&pipe->mutex);
 		goto out;
 	}
 	mutex_unlock(&pipe->mutex);
@@ -426,7 +426,7 @@ again:
 	
 		int copied = copy_page_from_iter(page, 0, PAGE_SIZE, from);
 		if (unlikely(copied < PAGE_SIZE && iov_iter_count(from))) {
-			kfree(page);
+			put_page(page);
 			break;
 		}
 		pipe_write_buf[i].len = copied;
@@ -434,7 +434,7 @@ again:
 
 	/* Null write succeeds. */
 	if (!i)
-		return 0;
+		return ret;
 
 	mutex_lock(&pipe->mutex);
 	was_empty = pipe_empty(pipe->head, pipe->tail);
@@ -471,6 +471,15 @@ again:
 	 */
 
 	for (int j = 0 ; j < i; ++j) {
+		if (!pipe->readers) {
+			if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
+				send_sig(SIGPIPE, current, 0);
+			if (!ret)
+				ret = -EPIPE;
+			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			break;
+		}
+
 		head = pipe->head;
 		if (!pipe_full(head, pipe->tail, pipe->max_usage)) {
 			struct pipe_buffer *buf;
@@ -492,6 +501,20 @@ again:
 			//printk("insert in pipe j: %d i: %d pipe_occupancy: %u max_usage: %u\n", j, i, pipe_occupancy(pipe->head, pipe->tail), pipe->max_usage);
 			continue;
 		}
+		/* Wait for buffer space to become available. */
+		if ((filp->f_flags & O_NONBLOCK) ||
+		    (iocb->ki_flags & IOCB_NOWAIT)) {
+			if (!ret)
+				ret = -EAGAIN;
+			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			break;
+		}
+		if (signal_pending(current)) {
+			if (!ret)
+				ret = -ERESTARTSYS;
+			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			break;
+		}
 		mutex_unlock(&pipe->mutex);
 
 		//printk("pipe full in write j: %d i: %d wait\n", j, i);
@@ -503,6 +526,7 @@ again:
 		was_empty = pipe_is_empty(pipe);
 		wake_next_writer = true;
 		//printk("pipe full in write j: %d i: %d continue\n", j, i);
+		--j;
 	}
 	is_full = pipe_full(pipe->head, pipe->tail, pipe->max_usage);
 	mutex_unlock(&pipe->mutex);
@@ -515,15 +539,9 @@ again:
 		goto again;
 	}
 
-	wait_event_interruptible_exclusive(pipe->wr_wait, pipe_writable(pipe));
-	mutex_lock(&pipe->mutex);
-	was_empty = pipe_is_empty(pipe);
-	wake_next_writer = true;
-
 out:
-	if (pipe_is_full(pipe))
+	if (is_full)
 		wake_next_writer = false;
-	mutex_unlock(&pipe->mutex);
 
 	/*
 	 * If we do do a wakeup event, we do a 'sync' wakeup, because we
