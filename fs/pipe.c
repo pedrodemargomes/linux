@@ -387,8 +387,9 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 	bool was_empty = false;
 	bool wake_next_writer = false;
 	bool is_full = false;
+	bool end = false;
 	struct pipe_write_buf pipe_write_buf[PIPE_DEF_BUFFERS];
-	int i;
+	int i, j;
 
 	/*
 	 * Reject writing to watch queue pipes before the point where we lock
@@ -407,18 +408,63 @@ anon_pipe_write(struct kiocb *iocb, struct iov_iter *from)
 		return 0;
 
 again:
+	i = 0;
+	j = 0;
 	mutex_lock(&pipe->mutex);
 	if (!pipe->readers) {
 		if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
 			send_sig(SIGPIPE, current, 0);
-		ret = -EPIPE;
+		if (!ret)
+			ret = -EPIPE;
 		mutex_unlock(&pipe->mutex);
+		end = true;
 		goto out;
+	}
+	/*
+	 * If it wasn't empty we try to merge new data into
+	 * the last buffer.
+	 *
+	 * That naturally merges small writes, but it also
+	 * page-aligns the rest of the writes for large writes
+	 * spanning multiple pages.
+	 */
+	was_empty = pipe_empty(pipe->head, pipe->tail);
+	head = pipe->head;
+	size_t chars = total_len & (PAGE_SIZE-1);
+	if (chars && !was_empty) {
+		struct pipe_buffer *buf = pipe_buf(pipe, head - 1);
+		int offset = buf->offset + buf->len;
+
+		if ((buf->flags & PIPE_BUF_FLAG_CAN_MERGE) &&
+		    offset + chars <= PAGE_SIZE) {
+			int error = pipe_buf_confirm(pipe, buf);
+			if (error) {
+				if (!ret)
+					ret = error;
+				mutex_unlock(&pipe->mutex);
+				goto out;
+			}
+			size_t n = copy_page_from_iter(buf->page, offset, chars, from);
+			if (unlikely(n < chars)) {
+				mutex_unlock(&pipe->mutex);
+				if (!ret)
+					ret = -EFAULT;
+				goto out;
+			}
+
+			buf->len += n;
+			ret += n;
+			if (!iov_iter_count(from)) {
+				mutex_unlock(&pipe->mutex);
+				goto out;
+			}
+		}
 	}
 	mutex_unlock(&pipe->mutex);
 
-	unsigned int free_bufs = READ_ONCE(pipe->max_usage) - pipe_buf_usage(pipe);
-	for (i = 0; i < min3(PIPE_DEF_BUFFERS, free_bufs, DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE)); ++i) {
+	int total_to_copy = 0;
+	//unsigned int free_bufs = READ_ONCE(pipe->max_usage) - pipe_buf_usage(pipe);
+	for (i = 0; i < min(PIPE_DEF_BUFFERS, DIV_ROUND_UP(iov_iter_count(from), PAGE_SIZE)); ++i) {
 		struct page *page = alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
 		if (!page)
 			break;
@@ -430,53 +476,26 @@ again:
 			break;
 		}
 		pipe_write_buf[i].len = copied;
+		total_to_copy += copied;
 	}
 
-	/* Null write succeeds. */
-	if (!i)
-		return ret;
+	if (!i) {
+		if (!ret)
+			return -EFAULT;
+		end = true;
+		goto out;
+	}
 
 	mutex_lock(&pipe->mutex);
 	was_empty = pipe_empty(pipe->head, pipe->tail);
-	/*
-	 * If it wasn't empty we try to merge new data into
-	 * the last buffer.
-	 *
-	 * That naturally merges small writes, but it also
-	 * page-aligns the rest of the writes for large writes
-	 * spanning multiple pages.
-	head = pipe->head;
-	chars = total_len & (PAGE_SIZE-1);
-	if (chars && !was_empty) {
-		struct pipe_buffer *buf = pipe_buf(pipe, head - 1);
-		int offset = buf->offset + buf->len;
-
-		if ((buf->flags & PIPE_BUF_FLAG_CAN_MERGE) &&
-		    offset + chars <= PAGE_SIZE) {
-			ret = pipe_buf_confirm(pipe, buf);
-			if (ret)
-				goto out;
-
-			ret = copy_page_from_iter(buf->page, offset, chars, from);
-			if (unlikely(ret < chars)) {
-				ret = -EFAULT;
-				goto out;
-			}
-
-			buf->len += ret;
-			if (!iov_iter_count(from))
-				goto out;
-		}
-	}
-	 */
-
-	for (int j = 0 ; j < i; ++j) {
+	for (j = 0 ; j < i; ++j) {
 		if (!pipe->readers) {
 			if ((iocb->ki_flags & IOCB_NOSIGNAL) == 0)
 				send_sig(SIGPIPE, current, 0);
 			if (!ret)
 				ret = -EPIPE;
-			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			iov_iter_revert(from, total_to_copy);
+			end = true;
 			break;
 		}
 
@@ -497,6 +516,7 @@ again:
 
 			buf->len = pipe_write_buf[j].len;
 			ret += pipe_write_buf[j].len;
+			total_to_copy -= pipe_write_buf[j].len;
 
 			//printk("insert in pipe j: %d i: %d pipe_occupancy: %u max_usage: %u\n", j, i, pipe_occupancy(pipe->head, pipe->tail), pipe->max_usage);
 			continue;
@@ -506,13 +526,15 @@ again:
 		    (iocb->ki_flags & IOCB_NOWAIT)) {
 			if (!ret)
 				ret = -EAGAIN;
-			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			iov_iter_revert(from, total_to_copy);
+			end = true;
 			break;
 		}
 		if (signal_pending(current)) {
 			if (!ret)
 				ret = -ERESTARTSYS;
-			iov_iter_revert(from, (i-j)*PAGE_SIZE);
+			iov_iter_revert(from, total_to_copy);
+			end = true;
 			break;
 		}
 		mutex_unlock(&pipe->mutex);
@@ -534,7 +556,7 @@ again:
 		wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
 	kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 
-	if (!is_full && iov_iter_count(from)) {
+	if (iov_iter_count(from) && !end) {
 		//printk("goto again\n");
 		goto again;
 	}
@@ -559,6 +581,10 @@ out:
 	kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 	if (wake_next_writer)
 		wake_up_interruptible_sync_poll(&pipe->wr_wait, EPOLLOUT | EPOLLWRNORM);
+
+	for (;j < i; ++j)
+		put_page(pipe_write_buf[j].page);
+
 	return ret;
 }
 
